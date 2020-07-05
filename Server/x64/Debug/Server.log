@@ -1,0 +1,23 @@
+﻿  stdafx.cpp
+  Server.cpp
+d:\hust\20192\it4060 lap trinh mang\btl\server\md5.h(353): warning C4267: '=': conversion from 'size_t' to 'int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\md5.h(377): warning C4267: 'argument': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\dbutils.h(57): warning C4800: 'int': forcing value to bool 'true' or 'false' (performance warning)
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(88): warning C4553: '==': operator has no effect; did you intend '='?
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(320): warning C4477: 'printf' : format string '%d' requires an argument of type 'int', but variadic argument 1 has type 'SOCKET'
+  d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(320): note: consider using '%lld' in the format string
+  d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(320): note: consider using '%Id' in the format string
+  d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(320): note: consider using '%I64d' in the format string
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(217): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(268): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(747): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(753): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(843): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(849): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(878): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+d:\hust\20192\it4060 lap trinh mang\btl\server\server.cpp(903): warning C4267: '=': conversion from 'size_t' to 'unsigned int', possible loss of data
+  resolve.cpp
+  Generating Code...
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(186): warning C4715: 'processOpLogIn': not all control paths return a value
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(608): warning C4715: 'processOpBrowsing': not all control paths return a value
+x64\Debug\resolve.obj : fatal error LNK1112: module machine type 'x64' conflicts with target machine type 'X86'

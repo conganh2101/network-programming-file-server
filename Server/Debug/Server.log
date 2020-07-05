@@ -1,0 +1,11 @@
+﻿  stdafx.cpp
+  Server.cpp
+d:\hust\20192\it4060 lap trinh mang\btl\server\dbutils.h(57): warning C4800: 'int': forcing value to bool 'true' or 'false' (performance warning)
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(88): warning C4553: '==': operator has no effect; did you intend '='?
+  resolve.cpp
+  Generating Code...
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(186): warning C4715: 'processOpLogIn': not all control paths return a value
+d:\hust\20192\it4060 lap trinh mang\btl\server\processor.h(608): warning C4715: 'processOpBrowsing': not all control paths return a value
+LINK : warning LNK4098: defaultlib 'LIBCMT' conflicts with use of other libs; use /NODEFAULTLIB:library
+  Server.vcxproj -> D:\HUST\20192\IT4060 Lap trinh mang\BTL\Debug\Server.exe
+  Server.vcxproj -> D:\HUST\20192\IT4060 Lap trinh mang\BTL\Debug\Server.pdb (Full PDB)
