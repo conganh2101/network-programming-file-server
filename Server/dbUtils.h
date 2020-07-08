@@ -6,7 +6,7 @@
 #include "dataStructures.h"
 #include "sqlite3.h"
 
-#define DB_NAME		"fileServerData.db"
+#define DB_NAME		"data.db"
 
 int accountHasAccessToGroupDb(Account* account, char* groupName);
 int addUserToGroupDb(Account* account, Group* group);
@@ -25,7 +25,7 @@ Return 0 if success
 int openDb() {
 	char *err_msg = 0;
 	int ret = sqlite3_open(DB_NAME, &db);
-	if (ret != SQLITE_OK) {
+	if (ret) {
 		fprintf(stderr, "Cannot open database: %s\n", sqlite3_errmsg(db));
 		sqlite3_close(db);
 		return 1;
@@ -51,10 +51,10 @@ int readAccountDb(std::list<Account>& accList) {
 	}
 
 	while (sqlite3_step(res) == SQLITE_ROW) {
-		acc.uid = sqlite3_column_int(res, 1);
-		strcpy_s(acc.username, CRE_MAXLEN, (const char *) sqlite3_column_text(res, 2));
-		strcpy_s(acc.password, CRE_MAXLEN, (const char *) sqlite3_column_text(res, 3));
-		acc.isLocked = (bool) sqlite3_column_int(res, 4);
+		acc.uid = sqlite3_column_int(res, 0);
+		strcpy_s(acc.username, CRE_MAXLEN, (const char *) sqlite3_column_text(res, 1));
+		strcpy_s(acc.password, CRE_MAXLEN, (const char *) sqlite3_column_text(res, 2));
+		acc.isLocked = (sqlite3_column_int(res, 3) == 1);
 
 		accList.push_back(acc);
 	}
@@ -81,10 +81,10 @@ int readGroupDb(std::list<Group>& groupList) {
 	}
 
 	while (sqlite3_step(res) == SQLITE_ROW) {
-		group.gid = sqlite3_column_int(res, 1);
-		strcpy_s(group.groupName, CRE_MAXLEN, (const char *)sqlite3_column_text(res, 2));
-		group.ownerId = sqlite3_column_int(res, 3);
-		strcpy_s(group.pathName, MAX_PATH, (const char *)sqlite3_column_text(res, 4));
+		group.gid = sqlite3_column_int(res, 0);
+		strcpy_s(group.groupName, CRE_MAXLEN, (const char *)sqlite3_column_text(res, 1));
+		group.ownerId = sqlite3_column_int(res, 2);
+		strcpy_s(group.pathName, MAX_PATH, (const char *)sqlite3_column_text(res, 3));
 
 		groupList.push_back(group);
 	}
@@ -117,6 +117,39 @@ int accountHasAccessToGroupDb(Account* account, char* groupName) {
 	}
 
 	ret = (sqlite3_step(res) == SQLITE_ROW);
+
+	sqlite3_finalize(res);
+	return ret;
+}
+
+int queryGroupForAccount(Account* account, std::list<Group> &groupList) {
+	sqlite3_stmt *res;
+	int ret;
+
+	if (db == NULL) {
+		fprintf(stderr, "Databased not opened!\n");
+		return -1;
+	}
+
+	char *sql = "SELECT g.GID, g.GROUPNAME FROM GROUPMEMBER gm"
+		"JOIN [GROUP] g ON g.GID = gm.GID "
+		"WHERE gm.UID = ?;";
+
+	ret = sqlite3_prepare_v2(db, sql, -1, &res, 0);
+	if (ret != SQLITE_OK) {
+		printf("Failed to execute statement: %s\n", sqlite3_errmsg(db));
+	}
+	else {
+		sqlite3_bind_int(res, 1, account->uid);
+	}
+
+	Group group;
+	while (sqlite3_step(res) == SQLITE_ROW) {
+		group.gid = sqlite3_column_int(res, 0);
+		strcpy_s(group.groupName, GROUPNAME_SIZE, (const char *)sqlite3_column_text(res, 1));
+
+		groupList.push_back(group);
+	}
 
 	sqlite3_finalize(res);
 	return ret;

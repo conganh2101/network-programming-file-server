@@ -6,7 +6,6 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include <stdio.h>
 #include <conio.h>
-#include <string.h>
 #include <stdlib.h>
 #include <WinSock2.h>
 #include <WS2tcpip.h>
@@ -26,10 +25,21 @@
 #define SEND                       1
 #define DIGEST_SIZE		           33
 
+
 void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags);
 unsigned __stdcall workerDownloadThread(LPVOID lpParameter);
+
 void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags);
 unsigned __stdcall workerUploadThread(LPVOID lpParameter);
+
+void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags);
+unsigned __stdcall workerSentThread(LPVOID lpParameter);
+
+void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags);
+unsigned __stdcall workerRecvThread(LPVOID lpParameter);
+
+void handleSent();
+void handleRecv();
 
 void uploadFileToServer(char *filePath);
 void downloadFileFromServer(char *filePath);
@@ -44,26 +54,35 @@ LPFILE_INFORMATION uploadFiles[MAX_SOCK];
 int nUploadSockets = 0;
 CRITICAL_SECTION uploadCriticalSection;
 
+LPSOCKET_INFORMATION clients;
+
 SOCKET client;
+SOCKET clientMain;
 sockaddr_in serverAddr;
+
+MESSAGE gSendMessage;
+MESSAGE gRecvMessage;
 
 WSAEVENT connUploadEvent;
 WSAEVENT connDownloadEvent;
+WSAEVENT connHandleSent;
+WSAEVENT connHandleRecv;
+
+int opcode;
 
 char name[100];
-
 
 int initializeNetwork(int argc, char** argv)
 {
 
 	InitializeCriticalSection(&downloadCriticalSection);
 	InitializeCriticalSection(&uploadCriticalSection);
-	//Step 1: Inittiate WinSock
+	// Inittiate WinSock
 	WSADATA wsaData;
 	WORD wVersion = MAKEWORD(2, 2);
 	if (WSAStartup(wVersion, &wsaData))
 		printf("Version is not supported\n");
-	//Step 3: Specify server address
+	// Specify server address
 	char*  IP;
 	unsigned long ulAddr;
 	IP = (char *)argv[1];
@@ -84,12 +103,308 @@ int initializeNetwork(int argc, char** argv)
 		printf("WSACreateEvent() failed with error %d\n", WSAGetLastError());
 		return 1;
 	}
+
+
+	if ((connHandleSent = WSACreateEvent()) == WSA_INVALID_EVENT)
+	{
+		printf("WSACreateEvent() failed with error %d\n", WSAGetLastError());
+		return 1;
+	}
+
+	if ((connHandleRecv = WSACreateEvent()) == WSA_INVALID_EVENT)
+	{
+		printf("WSACreateEvent() failed with error %d\n", WSAGetLastError());
+		return 1;
+	}
+
 	// Create a worker thread to service completed I/O requests	
 	_beginthreadex(0, 0, workerDownloadThread, (LPVOID)connDownloadEvent, 0, 0);
 	_beginthreadex(0, 0, workerUploadThread, (LPVOID)connUploadEvent, 0, 0);
+	_beginthreadex(0, 0, workerSentThread, (LPVOID)connHandleSent, 0, 0);
+	_beginthreadex(0, 0, workerRecvThread, (LPVOID)connHandleRecv, 0, 0);
+
+	if ((clientMain = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
+		printf("Failed to get a socket %d\n", WSAGetLastError());
+		exit(1);
+	}
+	// Set time-out for receiving
+	int tv = 10000; 
+	// setsockopt(clientMain, SOL_SOCKET, SO_RCVTIMEO, (const char*)(&tv), sizeof(int));
+	
+	//Step 4: Request to connect server
+	if (connect(clientMain, (sockaddr *)&serverAddr, sizeof(serverAddr))) {
+		printf("Error! Cannot connect to server. %d", WSAGetLastError());
+		exit(1);
+	}
 
 	return 0;
 }
+
+
+void handleSent()
+{
+
+	if (WSASetEvent(connHandleSent) == FALSE) {
+		printf("WSASetEvent() send failed with error %d\n", WSAGetLastError());
+		exit(1);
+	}
+
+}
+
+void handleRecv()
+{
+
+	if (WSASetEvent(connHandleRecv) == FALSE) {
+		printf("WSASetEvent() recv failed with error %d\n", WSAGetLastError());
+		exit(1);
+	}
+
+}
+
+
+
+unsigned __stdcall workerRecvThread(LPVOID lpParameter)
+{
+	DWORD flags;
+	WSAEVENT events[1];
+	DWORD index;
+	DWORD recvBytes;
+
+	// Save the accept event in the event array
+	events[0] = (WSAEVENT)lpParameter;
+	while (TRUE)
+	{
+		// Wait for accept() to signal an event and also process workerRoutine() returns
+		while (TRUE) {
+			index = WSAWaitForMultipleEvents(1, events, FALSE, WSA_INFINITE, TRUE);
+			if (index == WSA_WAIT_FAILED) {
+				printf("WSAWaitForMultipleEvents() failed with error %d\n", WSAGetLastError());
+				return 1;
+			}
+
+			if (index != WAIT_IO_COMPLETION) {
+				// An accept() call event is ready - break the wait loop
+				break;
+			}
+		}
+
+		WSAResetEvent(events[index - WSA_WAIT_EVENT_0]);
+
+		if ((clients = (LPSOCKET_INFORMATION)GlobalAlloc(GPTR, sizeof(SOCKET_INFORMATION))) == NULL) {
+			printf("GlobalAlloc() failed with error %d\n", GetLastError());
+			return 1;
+		}
+
+		memcpy(clients->buff, &gSendMessage, sizeof(MESSAGE));
+		// Fill in the details of our accepted socket
+		clients->sockfd = clientMain;
+		ZeroMemory(&(clients->overlapped), sizeof(WSAOVERLAPPED));
+		clients->sentBytes = 0;
+		clients->recvBytes = 0;
+		clients->dataBuff.len = sizeof(MESSAGE);
+		clients->dataBuff.buf = clients->buff;
+		clients->operation = RECEIVE;
+		flags = 0;
+
+		if (WSARecv(clients->sockfd, &(clients->dataBuff), 1, &recvBytes,
+			&flags, &(clients->overlapped), workerRecvRoutine) == SOCKET_ERROR) {
+			if (WSAGetLastError() != WSA_IO_PENDING) {
+				printf("WSARecv() failed with error %d\n", WSAGetLastError());
+				return 1;
+			}
+		}
+
+
+	}
+
+	return 0;
+}
+
+
+void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
+{
+	DWORD sendBytes, recvBytes;
+	DWORD Flags;
+
+	LPSOCKET_INFORMATION sockInfo = (LPSOCKET_INFORMATION)overlapped;
+
+	if (error != 0)
+		printf("I/O operation failed with error %d\n", error);
+
+	if (transferredBytes == 0)
+		printf("Closing socket %d\n\n", clientMain);
+
+	if (error != 0 || transferredBytes == 0) {
+		//Find and remove socket
+		closesocket(clientMain);
+		return;
+	}
+
+	if (sockInfo->operation == RECEIVE) {
+		sockInfo->recvBytes += transferredBytes;
+		sockInfo->sentBytes = 0;
+	}
+	if (sockInfo->recvBytes > sockInfo->sentBytes)
+	{// after sending to server
+	 // after receive from server
+		if (sockInfo->recvBytes < sizeof(MESSAGE))
+		{// if receive bytes is less than message size
+		 // post another WSARecv
+			ZeroMemory(&(sockInfo->overlapped), sizeof(OVERLAPPED));
+			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->recvBytes;
+			sockInfo->operation = RECEIVE;
+
+			if (WSARecv(sockInfo->sockfd,
+				&(sockInfo->dataBuff),
+				1,
+				&transferredBytes,
+				0,
+				&(sockInfo->overlapped),
+				workerUploadRoutine) == SOCKET_ERROR) {
+				if (WSAGetLastError() != ERROR_IO_PENDING) {
+					printf("WSARecv1() failed with error %d\n", WSAGetLastError());
+					return;
+				}
+			}
+		}
+		else if (sockInfo->recvBytes == sizeof(MESSAGE))
+		{// if receive message to annouce result from server
+		 // process the information
+
+			MESSAGE  *recvMessage;
+			recvMessage = (MESSAGE *)sockInfo->dataBuff.buf;
+			gRecvMessage = *recvMessage;
+			return;
+		}
+	}
+}
+
+unsigned __stdcall workerSentThread(LPVOID lpParameter)
+{
+	DWORD flags;
+	WSAEVENT events[1];
+	DWORD index;
+	DWORD sendBytes;
+
+	// Save the accept event in the event array
+	events[0] = (WSAEVENT)lpParameter;
+	while (TRUE)
+	{
+		// Wait for accept() to signal an event and also process workerRoutine() returns
+		while (TRUE) {
+			index = WSAWaitForMultipleEvents(1, events, FALSE, WSA_INFINITE, TRUE);
+			if (index == WSA_WAIT_FAILED) {
+				printf("WSAWaitForMultipleEvents() failed with error %d\n", WSAGetLastError());
+				return 1;
+			}
+
+			if (index != WAIT_IO_COMPLETION) {
+				// An accept() call event is ready - break the wait loop
+				break;
+			}
+		}
+
+		WSAResetEvent(events[index - WSA_WAIT_EVENT_0]);
+
+		if ((clients = (LPSOCKET_INFORMATION)GlobalAlloc(GPTR, sizeof(SOCKET_INFORMATION))) == NULL) {
+			printf("GlobalAlloc() failed with error %d\n", GetLastError());
+			return 1;
+		}
+
+		memcpy(clients->buff, &gSendMessage, sizeof(MESSAGE));
+		// Fill in the details of our accepted socket
+		clients->sockfd = clientMain;
+		ZeroMemory(&(clients->overlapped), sizeof(WSAOVERLAPPED));
+		clients->sentBytes = 0;
+		clients->recvBytes = 0;
+		clients->dataBuff.len = sizeof(MESSAGE);
+		clients->dataBuff.buf = clients->buff;
+		clients->operation = SEND;
+		flags = 0;
+
+		if (WSASend(clients->sockfd, &(clients->dataBuff), 1,
+			&sendBytes, 0, &(clients->overlapped), workerSentRoutine) == SOCKET_ERROR) {
+			if (WSAGetLastError() != WSA_IO_PENDING) {
+				printf("WSASend() failed with error %d\n", WSAGetLastError());
+				return 1;
+			}
+		}
+
+
+	}
+
+	return 0;
+}
+
+
+void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
+{
+	DWORD sendBytes, recvBytes;
+	DWORD Flags;
+
+	LPSOCKET_INFORMATION sockInfo = (LPSOCKET_INFORMATION)overlapped;
+
+	if (error != 0)
+		printf("I/O operation failed with error %d\n", error);
+
+	if (transferredBytes == 0)
+		printf("Closing socket %d\n\n", clientMain);
+
+	if (error != 0 || transferredBytes == 0) {
+		//Find and remove socket
+
+
+		closesocket(clientMain);
+
+
+
+
+		return;
+	}
+
+
+
+	if (sockInfo->operation == SEND) {
+		sockInfo->sentBytes += transferredBytes;
+		sockInfo->recvBytes = 0;
+	}
+	else if (sockInfo->operation == RECEIVE) {
+		sockInfo->recvBytes += transferredBytes;
+		sockInfo->sentBytes = 0;
+	}
+
+	if (sockInfo->recvBytes < sockInfo->sentBytes)
+
+	{// after sending to server
+		if (sockInfo->sentBytes < sizeof(MESSAGE))
+		{   // if sent bytes is less than message size
+			// post another WSASend
+
+			ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
+			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->sentBytes;
+			sockInfo->operation = SEND;
+			if (WSASend(sockInfo->sockfd,
+				&(sockInfo->dataBuff),
+				1,
+				&sendBytes,
+				0,
+				&(sockInfo->overlapped),
+				workerUploadRoutine) == SOCKET_ERROR) {
+				if (WSAGetLastError() != WSA_IO_PENDING) {
+					printf("WSASend() failed with error %d\n", WSAGetLastError());
+					return;
+				}
+			}
+		}
+		else if (sockInfo->sentBytes == sizeof(MESSAGE))
+		{// after sent bytes equal to message size
+			return;
+		}
+	}
+}
+
 
 void downloadFileFromServer(char *filepath) {
 	strcpy_s(name, filepath);
@@ -206,8 +521,8 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		fseek(file, 0, SEEK_SET);
 		uploadFiles[nUploadSockets]->nLeft = uploadFiles[nUploadSockets]->fileLen;
 		uploadFiles[nUploadSockets]->idx = 0;
-		message sendMessage;
-		sendMessage.opcode = fileNameUpload;
+		MESSAGE sendMessage;
+		sendMessage.opcode = OPT_FILE_UP;
 
 		uploadFiles[nUploadSockets]->fileBuffer = (char*)malloc(uploadFiles[nUploadSockets]->fileLen + 1);
 		if (!uploadFiles[nUploadSockets]->fileBuffer)
@@ -220,7 +535,7 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		fread(uploadFiles[nUploadSockets]->fileBuffer, uploadFiles[nUploadSockets]->fileLen, 1, file);
 		strcpy_s(sendMessage.payload, uploadFiles[nUploadSockets]->fileName);
 		sendMessage.length = strlen(uploadFiles[nUploadSockets]->fileName);
-		memcpy(uploadSockets[nUploadSockets]->buff, &sendMessage, sizeof(message));
+		memcpy(uploadSockets[nUploadSockets]->buff, &sendMessage, sizeof(MESSAGE));
 
 		fclose(file);
 
@@ -231,7 +546,7 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		ZeroMemory(&uploadSockets[nUploadSockets]->overlapped, sizeof(WSAOVERLAPPED));
 		uploadSockets[nUploadSockets]->sentBytes = 0;
 		uploadSockets[nUploadSockets]->recvBytes = 0;
-		uploadSockets[nUploadSockets]->dataBuff.len = sizeof(message);
+		uploadSockets[nUploadSockets]->dataBuff.len = sizeof(MESSAGE);
 		uploadSockets[nUploadSockets]->dataBuff.buf = uploadSockets[nUploadSockets]->buff;
 		uploadSockets[nUploadSockets]->operation = SEND;
 		flags = 0;
@@ -307,12 +622,12 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 
 	if (sockInfo->recvBytes > sockInfo->sentBytes)
 	{// after receive from server
-		if (sockInfo->recvBytes < sizeof(message))
+		if (sockInfo->recvBytes < sizeof(MESSAGE))
 		{// if receive bytes is less than message size
 		 // post another WSARecv
 			ZeroMemory(&(sockInfo->overlapped), sizeof(OVERLAPPED));
 			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
-			sockInfo->dataBuff.len = sizeof(message) - sockInfo->recvBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->recvBytes;
 			sockInfo->operation = RECEIVE;
 
 			if (WSARecv(sockInfo->sockfd,
@@ -328,28 +643,28 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				}
 			}
 		}
-		else if (sockInfo->recvBytes == sizeof(message))
+		else if (sockInfo->recvBytes == sizeof(MESSAGE))
 		{// if receive message to annouce result from server
 		 // process the information
-			message  *recvMessage;
-			recvMessage = (message *)sockInfo->dataBuff.buf;
-			if (recvMessage->opcode == uploadFile)
+			MESSAGE  *recvMessage;
+			recvMessage = (MESSAGE *)sockInfo->dataBuff.buf;
+			if (recvMessage->opcode == OPS_OK)
 			{   // receive message that server allow to begin upload file
 				// because file is not existing on server
-				message sendMessage;
-				sendMessage.opcode = md5Code;
+				MESSAGE sendMessage;
+				sendMessage.opcode = OPT_FILE_DIGEST;
 				MD5 md5;
 				char *digest = md5.digestFile(uploadFiles[index]->fileName);
 				strcpy_s(sendMessage.payload, digest);
 				sendMessage.length = strlen(digest);
 
-				memcpy(sockInfo->buff, &sendMessage, sizeof(message));
+				memcpy(sockInfo->buff, &sendMessage, sizeof(MESSAGE));
 
 				//Third: begin to sending data of file to server
 				ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 				sockInfo->sentBytes = 0;
 				sockInfo->dataBuff.buf = sockInfo->buff;
-				sockInfo->dataBuff.len = sizeof(message);
+				sockInfo->dataBuff.len = sizeof(MESSAGE);
 				sockInfo->operation = SEND;
 				if (WSASend(sockInfo->sockfd,
 					&(sockInfo->dataBuff),
@@ -364,7 +679,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 					}
 				}
 			}
-			else if (recvMessage->opcode == success)
+			else if (recvMessage->opcode == OPS_SUCCESS)
 			{   // message from server to annouce that
 				// file has been upload successfully
 				EnterCriticalSection(&uploadCriticalSection);
@@ -388,7 +703,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				LeaveCriticalSection(&uploadCriticalSection);
 				printf("File store at address: %s  in server \n", recvMessage->payload);
 			}
-			else if (recvMessage->opcode == fileExist)
+			else if (recvMessage->opcode == OPS_ERR_ALREADYEXISTS)
 			{
 				// message from server to annouce that
 				// file is existing on server
@@ -413,7 +728,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				LeaveCriticalSection(&uploadCriticalSection);
 				printf("File existed  at address: %s in server\n", recvMessage->payload);
 			}
-			else if (recvMessage->opcode == fileCorrupted)
+			else if (recvMessage->opcode == OPS_ERR_FILE_CORRUPTED)
 			{
 				printf("File corrupted on server. Ready to restart upload again to server.");
 
@@ -448,13 +763,13 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 	}
 	else
 	{// after sending to server
-		if (sockInfo->sentBytes < sizeof(message))
+		if (sockInfo->sentBytes < sizeof(MESSAGE))
 		{   // if sent bytes is less than message size
 			// post another WSASend
 
 			ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
-			sockInfo->dataBuff.len = sizeof(message) - sockInfo->sentBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->sentBytes;
 			sockInfo->operation = SEND;
 			if (WSASend(sockInfo->sockfd,
 				&(sockInfo->dataBuff),
@@ -469,10 +784,10 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				}
 			}
 		}
-		else if (sockInfo->sentBytes == sizeof(message))
+		else if (sockInfo->sentBytes == sizeof(MESSAGE))
 		{// after sent bytes equal to message size
-			message  *sendMessage;
-			sendMessage = (message *)sockInfo->dataBuff.buf;
+			MESSAGE  *sendMessage;
+			sendMessage = (MESSAGE *)sockInfo->dataBuff.buf;
 			if (sendMessage->length == 0)
 			{   // if sent message has length=0
 				// post WSARecv to receive result from server
@@ -480,7 +795,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				sockInfo->recvBytes = 0;
 				sockInfo->sentBytes = 0;
 				Flags = 0;
-				sockInfo->dataBuff.len = sizeof(message);
+				sockInfo->dataBuff.len = sizeof(MESSAGE);
 				sockInfo->dataBuff.buf = sockInfo->buff;
 				sockInfo->operation = RECEIVE;
 				if (WSARecv(sockInfo->sockfd,
@@ -498,14 +813,14 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 			}
 			else if (sendMessage->length > 0)
 			{
-				if (sendMessage->opcode == fileNameUpload) {
+				if (sendMessage->opcode == OPT_FILE_UP) {
 					//Second: after sending file name to server
 					// post WSARecv to confirm file is existing on server or not
 					ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 					sockInfo->recvBytes = 0;
 					sockInfo->sentBytes = 0;
 					Flags = 0;
-					sockInfo->dataBuff.len = sizeof(message);
+					sockInfo->dataBuff.len = sizeof(MESSAGE);
 					sockInfo->dataBuff.buf = sockInfo->buff;
 					sockInfo->operation = RECEIVE;
 					if (WSARecv(sockInfo->sockfd,
@@ -521,13 +836,13 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 						}
 					}
 				}
-				else if (sendMessage->opcode == sendingData)
+				else if (sendMessage->opcode == OPT_FILE_DATA)
 				{
 					if (uploadFiles[index]->nLeft > 0)
 					{// if file still contains data that havent been sent
 					 // post another WSASent to send remain data to server (length>0)
-						message sendMessage;
-						sendMessage.opcode = sendingData;
+						MESSAGE sendMessage;
+						sendMessage.opcode = OPT_FILE_DATA;
 
 						if (uploadFiles[index]->nLeft > BUFF_SIZE)
 						{
@@ -544,12 +859,12 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 							sendMessage.length = uploadFiles[index]->nLeft;
 						}
 						sendMessage.offset = uploadFiles[index]->idx;
-						memcpy(sockInfo->buff, &sendMessage, sizeof(message));
+						memcpy(sockInfo->buff, &sendMessage, sizeof(MESSAGE));
 
 						ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 						sockInfo->sentBytes = 0;
 						sockInfo->dataBuff.buf = sockInfo->buff;
-						sockInfo->dataBuff.len = sizeof(message);
+						sockInfo->dataBuff.len = sizeof(MESSAGE);
 						sockInfo->operation = SEND;
 						if (WSASend(sockInfo->sockfd,
 							&(sockInfo->dataBuff),
@@ -570,15 +885,15 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 					{   // if sent all data in file 
 						// post WSASent to send the message with length=0
 						// to annouce that this is the last message
-						message sendMessage;
-						sendMessage.opcode = sendingData;
+						MESSAGE sendMessage;
+						sendMessage.opcode = OPT_FILE_DATA;
 						sendMessage.payload[0] = 0;
 						sendMessage.length = 0;
-						memcpy(sockInfo->buff, &sendMessage, sizeof(message));//???
+						memcpy(sockInfo->buff, &sendMessage, sizeof(MESSAGE));//???
 						ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 						sockInfo->sentBytes = 0;
 						sockInfo->dataBuff.buf = sockInfo->buff;
-						sockInfo->dataBuff.len = sizeof(message);
+						sockInfo->dataBuff.len = sizeof(MESSAGE);
 						sockInfo->operation = SEND;
 						if (WSASend(sockInfo->sockfd,
 							&(sockInfo->dataBuff),
@@ -594,10 +909,10 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 						}
 					}
 				}
-				else if (sendMessage->opcode == md5Code)
+				else if (sendMessage->opcode == OPT_FILE_DIGEST)
 				{
-					message sendMessage;
-					sendMessage.opcode = sendingData;
+					MESSAGE sendMessage;
+					sendMessage.opcode = OPT_FILE_DATA;
 					if (uploadFiles[index]->nLeft > BUFF_SIZE)
 					{
 						for (int i = 0; i < BUFF_SIZE; i++) {
@@ -614,13 +929,13 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 					}
 					sendMessage.offset = uploadFiles[index]->idx;
 
-					memcpy(sockInfo->buff, &sendMessage, sizeof(message));
+					memcpy(sockInfo->buff, &sendMessage, sizeof(MESSAGE));
 
 					//Third: begin to sending data of file to server
 					ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 					sockInfo->sentBytes = 0;
 					sockInfo->dataBuff.buf = sockInfo->buff;
-					sockInfo->dataBuff.len = sizeof(message);
+					sockInfo->dataBuff.len = sizeof(MESSAGE);
 					sockInfo->operation = SEND;
 					if (WSASend(sockInfo->sockfd,
 						&(sockInfo->dataBuff),
@@ -686,12 +1001,12 @@ unsigned __stdcall workerDownloadThread(LPVOID lpParameter)
 
 		//Get file length
 
-		message sendMessage;
-		sendMessage.opcode = fileNameDownload;
+		MESSAGE sendMessage;
+		sendMessage.opcode = OPT_FILE_DOWN;
 
 		strcpy_s(sendMessage.payload, downloadFiles[nDownloadSockets]->fileName);
 		sendMessage.length = strlen(downloadFiles[nDownloadSockets]->fileName);
-		memcpy(downloadSockets[nDownloadSockets]->buff, &sendMessage, sizeof(message));
+		memcpy(downloadSockets[nDownloadSockets]->buff, &sendMessage, sizeof(MESSAGE));
 
 		// gui message moi vs payload la ten file
 
@@ -699,7 +1014,7 @@ unsigned __stdcall workerDownloadThread(LPVOID lpParameter)
 		ZeroMemory(&downloadSockets[nDownloadSockets]->overlapped, sizeof(WSAOVERLAPPED));
 		downloadSockets[nDownloadSockets]->sentBytes = 0;
 		downloadSockets[nDownloadSockets]->recvBytes = 0;
-		downloadSockets[nDownloadSockets]->dataBuff.len = sizeof(message);
+		downloadSockets[nDownloadSockets]->dataBuff.len = sizeof(MESSAGE);
 		downloadSockets[nDownloadSockets]->dataBuff.buf = downloadSockets[nDownloadSockets]->buff;
 		downloadSockets[nDownloadSockets]->operation = SEND;
 		flags = 0;
@@ -779,12 +1094,12 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 
 	if (sockInfo->recvBytes > sockInfo->sentBytes)
 	{// after receive from server
-		if (sockInfo->recvBytes < sizeof(message))
+		if (sockInfo->recvBytes < sizeof(MESSAGE))
 		{// if receive bytes is less than message size
 		 // post another WSARecv
 			ZeroMemory(&(sockInfo->overlapped), sizeof(OVERLAPPED));
 			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
-			sockInfo->dataBuff.len = sizeof(message) - sockInfo->recvBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->recvBytes;
 			sockInfo->operation = RECEIVE;
 
 			if (WSARecv(sockInfo->sockfd,
@@ -800,12 +1115,12 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 				}
 			}
 		}
-		else if (sockInfo->recvBytes == sizeof(message))
+		else if (sockInfo->recvBytes == sizeof(MESSAGE))
 		{// if receive message to annouce result from server
 		 // process the information
-			message  *recvMessage;
-			recvMessage = (message *)sockInfo->dataBuff.buf;
-			if (recvMessage->opcode == sendingData)
+			MESSAGE  *recvMessage;
+			recvMessage = (MESSAGE *)sockInfo->dataBuff.buf;
+			if (recvMessage->opcode == OPT_FILE_DATA)
 			{
 				if (recvMessage->length == 0)
 				{//nhan duoc goi tin cuoi cung
@@ -860,7 +1175,7 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 					sockInfo->recvBytes = 0;
 					sockInfo->sentBytes = 0;
 					Flags = 0;
-					sockInfo->dataBuff.len = sizeof(message);
+					sockInfo->dataBuff.len = sizeof(MESSAGE);
 					sockInfo->dataBuff.buf = sockInfo->buff;
 					sockInfo->operation = RECEIVE;
 					if (WSARecv(sockInfo->sockfd,
@@ -877,7 +1192,7 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 					}
 				}
 			}
-			else if (recvMessage->opcode == md5Code)
+			else if (recvMessage->opcode == OPT_FILE_DIGEST)
 			{
 				printf("checking");
 
@@ -891,15 +1206,15 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 
 				strcpy_s(downloadFiles[index]->digest, recvMessage->payload);
 
-				message sendMessage;
-				sendMessage.opcode = downloadFile;
+				MESSAGE sendMessage;
+				sendMessage.opcode = OPS_OK;
 				sendMessage.payload[0] = 0;
 				sendMessage.length = 0;
-				memcpy(sockInfo->buff, &sendMessage, sizeof(message));//???
+				memcpy(sockInfo->buff, &sendMessage, sizeof(MESSAGE));//???
 				ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 				sockInfo->sentBytes = 0;
 				sockInfo->dataBuff.buf = sockInfo->buff;
-				sockInfo->dataBuff.len = sizeof(message);
+				sockInfo->dataBuff.len = sizeof(MESSAGE);
 				sockInfo->operation = SEND;
 				if (WSASend(sockInfo->sockfd,
 					&(sockInfo->dataBuff),
@@ -914,7 +1229,7 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 					}
 				}
 			}
-			else if (recvMessage->opcode == noFileExist)
+			else if (recvMessage->opcode == OPS_ERR_NOTFOUND)
 			{
 				// message from server to annouce that
 				// file is existing on server
@@ -943,13 +1258,13 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 	}
 	else
 	{// after sending to server
-		if (sockInfo->sentBytes < sizeof(message))
+		if (sockInfo->sentBytes < sizeof(MESSAGE))
 		{   // if sent bytes is less than message size
 			// post another WSASend
 
 			ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 			sockInfo->dataBuff.buf = sockInfo->buff + sockInfo->sentBytes;
-			sockInfo->dataBuff.len = sizeof(message) - sockInfo->sentBytes;
+			sockInfo->dataBuff.len = sizeof(MESSAGE) - sockInfo->sentBytes;
 			sockInfo->operation = SEND;
 			if (WSASend(sockInfo->sockfd,
 				&(sockInfo->dataBuff),
@@ -964,11 +1279,11 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 				}
 			}
 		}
-		else if (sockInfo->sentBytes == sizeof(message))
+		else if (sockInfo->sentBytes == sizeof(MESSAGE))
 		{// after sent bytes equal to message size
-			message  *sendMessage;
-			sendMessage = (message *)sockInfo->dataBuff.buf;
-			if (sendMessage->opcode == fileNameDownload)
+			MESSAGE  *sendMessage;
+			sendMessage = (MESSAGE *)sockInfo->dataBuff.buf;
+			if (sendMessage->opcode == OPT_FILE_DOWN)
 			{
 				//Second: after sending file name to server
 				// post WSARecv to confirm file is existing on server or not
@@ -976,7 +1291,7 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 				sockInfo->recvBytes = 0;
 				sockInfo->sentBytes = 0;
 				Flags = 0;
-				sockInfo->dataBuff.len = sizeof(message);
+				sockInfo->dataBuff.len = sizeof(MESSAGE);
 				sockInfo->dataBuff.buf = sockInfo->buff;
 				sockInfo->operation = RECEIVE;
 				if (WSARecv(sockInfo->sockfd,
@@ -992,13 +1307,13 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 					}
 				}
 			}
-			else if (sendMessage->opcode == downloadFile)
+			else if (sendMessage->opcode == OPS_OK)
 			{
 				ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 				sockInfo->recvBytes = 0;
 				sockInfo->sentBytes = 0;
 				Flags = 0;
-				sockInfo->dataBuff.len = sizeof(message);
+				sockInfo->dataBuff.len = sizeof(MESSAGE);
 				sockInfo->dataBuff.buf = sockInfo->buff;
 				sockInfo->operation = RECEIVE;
 				if (WSARecv(sockInfo->sockfd,
@@ -1017,36 +1332,3 @@ void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOV
 		}
 	}
 }
-
-
-int sendReq(char* buff, int buffLen) {
-	int iRetVal;
-
-	// Send message
-	iRetVal = send_s(client, buff, strlen(buff));
-	if (iRetVal == SOCKET_ERROR) {
-		printf("[!] Error %d! Cannot send to server!\n", WSAGetLastError());
-		return 1;
-	}
-	printf("[+] Waiting for server.\n");
-
-	// Receive response
-	iRetVal = recv_s(client, buff, buffLen);
-	switch (iRetVal) {
-	case SOCKET_ERROR:
-		if (WSAGetLastError() == WSAETIMEDOUT)
-			printf("[!] Time-out! No response from server.\n");
-		else
-			printf("[!] Error %d! Cannot receive message from server!\n", WSAGetLastError());
-		return 1;
-	case 0:
-		printf("[!] Server closed connection.\n");
-		return 1;
-	case RECVMSG_CORRUPT:
-		printf("[!] Response from server corrupted.\n");
-		return 1;
-	default:
-		return 0;
-	}
-}
-

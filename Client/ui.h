@@ -2,7 +2,31 @@
 #ifndef UI_H_
 #define UI_H_
 
-#include "network.h"
+#include <stdlib.h>
+#include "processor.h"
+
+using namespace std;
+
+bool quit = false;
+extern bool isLoggedIn;
+char username[CRE_MAXLEN];
+char password[CRE_MAXLEN];
+char* currentGroup;
+vector<char*> fileList;
+
+void handleLogIn();
+void handleLogOut();
+void handleNavigate();
+void handleNewFolder();
+void handleUpload();
+void handleDownload();
+void handleVisitGroup();
+void handleCreateGroup();
+void handleJoinGroup();
+void handleLeaveGroup();
+void showMenuNotLoggedIn();
+void showMenuLoggedIn();
+void showGroupMenu();
 
 void getPassword(char *password) {
 	char ch = 0;
@@ -36,68 +60,53 @@ void getPassword(char *password) {
 
 void showStatusMsg(int statusCode, char* opType) {
 	switch (statusCode) {
-	case RES_OK:
+	case OPS_OK:
 		printf("%s successful.\n", opType);
 		return;
-	case RES_BAD_REQUEST:
+	case OPS_ERR_BADREQUEST:
 		printf("Bad request error!\n");
 		return;
-	case RES_LI_WRONG_PASS:
+	case OPS_ERR_WRONGPASS:
 		printf("Wrong password. Please try again!\n");
 		return;
-	case RES_LI_ALREADY_LI:
-		printf("You have already logged in on this device!\n");
-		return;
-	case RES_LI_ACC_LOCKED:
-		printf("Account is disabled. Please contact admin!\n");
-		return;
-	case RES_LI_ACC_NOT_FOUND:
-		printf("Account not found. Do you have other id?\n");
-		return;
-	case RES_LI_ELSEWHERE:
-		printf("Account already logged in on another device\n");
-		return;
-	case RES_LO_NOT_LI:
+	case OPS_ERR_NOTLOGGEDIN:
 		printf("You did not log in!\n");
 		return;
-	case RES_RA_SID_NOT_FOUND:
-		printf("No active session found.\n");
+	case OPS_ERR_LOCKED:
+		printf("Account locked!\n");
+		return;
+	case OPS_ERR_ANOTHERCLIENT:
+		printf("Account logged in on another client!\n");
+		return;
+	case OPS_ERR_ALREADYINGROUP:
+		printf("Account is already in this group!\n");
+		return;
+	case OPS_ERR_GROUPEXISTS:
+		printf("A group with this name already exists!\n");
+		return;
+	case OPS_ERR_ALREADYEXISTS:
+		printf("Item already exists.\n");
+		return;
+	case OPS_ERR_SERVERFAIL:
+		printf("Internal server error.\n");
+		return;
+	case OPS_ERR_FORBIDDEN:
+		printf("You don't have permission to perform this action.\n");
+		return;
+	case OPS_ERR_NOTFOUND:
+		printf("Item not found.\n");
 		return;
 	}
 }
-
-void handleUserChoice() {
-	int choice = userChoice();
-	char filepath[100];
-
-	switch (choice) {
-	case 1:
-		printf("\nEnter file name below:\n");
-		gets_s(filepath);
-		uploadFileToServer(filepath);
-		break;
-	case 2:
-		printf("\nEnter file name below:\n");
-		gets_s(filepath);
-		downloadFileFromServer(filepath);
-		break;
-	case 3:
-		printf("Exit");
-		exit(1);
-		break;
-	}
-}
-
 
 void showMenuNotLoggedIn() {
 	system("cls");
 	printf("|================+++============|\n");
 	printf("|		  File Transfer			|\n");
 	printf("|_____________[Menu]____________|\n");
-	printf("|								|\n");
-	printf("|      1.Login					|\n");
-	printf("|	   2.Exit					|\n");
-	printf("|								|\n");
+	printf("|                               |\n");
+	printf("|		1. Login				|\n");
+	printf("|		2. Exit					|\n");
 	printf("|								|\n");
 	printf("|===============================|\n");
 
@@ -106,7 +115,7 @@ void showMenuNotLoggedIn() {
 		choice = _getch();
 		switch (choice) {
 		case '1':
-			logInUI();
+			handleLogIn();
 			break;
 		case '2':
 			quit = true;
@@ -116,7 +125,6 @@ void showMenuNotLoggedIn() {
 			choice = '.';
 		}
 	} while (choice == '.');
-
 }
 
 void showMenuLoggedIn() {
@@ -132,44 +140,308 @@ void showMenuLoggedIn() {
 	printf("|	   5. Exit					|\n");
 	printf("|								|\n");
 	printf("|===============================|\n");
+
+	char choice = '.';
+	do {
+		choice = _getch();
+		switch (choice) {
+		case '1':
+			handleVisitGroup();
+			break;
+		case '2':
+			handleCreateGroup();
+		case '3':
+			handleJoinGroup();
+		case '4':
+			handleLogOut();
+		case '5':
+			quit = true;
+			return;
+		default:
+			printf("\nInvalid choice. Please choose again: ");
+			choice = '.';
+		}
+	} while (choice == '.');
 }
 
-void handleVisitGroup() {
+void showGroupMenu() {
 	system("cls");
 	printf("|================+++============|\n");
 	printf("|		  File Transfer			|\n");
 	printf("|_____________[Menu]____________|\n");
 	printf("|								|\n");
-	printf("|      1. Visit group			|\n");
-	printf("|	   2. Create new group		|\n");
-	printf("|	   3. Join group			|\n");
-	printf("|	   4. Log out				|\n");
-	printf("|	   5. Exit					|\n");
+	printf("|      1. Navigate				|\n");
+	printf("|	   2. Create new folder		|\n");
+	printf("|	   3. Upload file			|\n");
+	printf("|	   4. Download file			|\n");
+	printf("|	   5. Leave group			|\n");
+	printf("|	   6. Back					|\n");
+	printf("|      7. Exit					|\n");
 	printf("|								|\n");
 	printf("|===============================|\n");
+
+	char choice = '.';
+	do {
+		choice = _getch();
+		switch (choice) {
+		case '1':
+			handleNavigate();
+			break;
+		case '2':
+			handleNewFolder();
+			break;
+		case '3':
+			handleUpload();
+			break;
+		case '4':
+			handleDownload();
+			break;
+		case '5':
+			handleLeaveGroup();
+		case '6':
+			//handleBack();
+		case '7':
+			quit = true;
+			return;
+		default:
+			printf("\nInvalid choice. Please choose again: ");
+			choice = '.';
+		}
+	} while (choice == '.');
+}
+
+
+/*****************************
+Group
+*****************************/
+
+void handleVisitGroup() {
+	printf("\n");
+
+	int groupCount = 0;
+	vector<char*> groupList;
+
+	int ret = processOpGroupList(groupList);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+
+	for (char* group : groupList) {
+		printf("%d. %s", ++groupCount, group);
+	}
+
+	int selection;
+	bool valid;
+	do {
+		valid = true;
+		printf("Choose group: ");
+		scanf("%d", &selection);
+		
+		if (selection > groupCount || selection < 0) {
+			valid = false;
+		}
+
+	} while (!valid);
+	printf("\n\n");
+
+	ret = processOpGroup(OPG_GROUP_USE, groupList[selection]);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		for (char* group : groupList) {
+			free(group);
+		}
+
+		Sleep(2000);
+		return;
+	}
+
+	currentGroup = groupList[selection];
+	for (char* group : groupList) {
+		if (group != currentGroup) free(group);
+	}
+
+	showStatusMsg(ret, "Enter group");
+	Sleep(2000);
 }
 
 void handleCreateGroup() {
+	char newGroupName[GROUPNAME_SIZE];
+	printf("\n");
 
+	bool valid;
+	do {
+		valid = true;
+		printf("Group name should be %d characters or less.\n", GROUPNAME_SIZE);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", GROUPNAME_SIZE);
+		printf("New group name: ");
+		gets_s(newGroupName, GROUPNAME_SIZE);
+	} while (!valid);
+	printf("\n\n");
+
+	int ret = processOpGroup(OPG_GROUP_NEW, newGroupName);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+	showStatusMsg(ret, "Create group");
+	Sleep(2000);
 }
 
 void handleJoinGroup() {
+	char groupName[GROUPNAME_SIZE];
+	printf("\n");
 
+	bool valid;
+	do {
+		valid = true;
+		printf("Group name should be %d characters or less.\n", GROUPNAME_SIZE);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", GROUPNAME_SIZE);
+		printf("Enter group name to join: ");
+		gets_s(groupName, GROUPNAME_SIZE);
+	} while (!valid);
+	printf("\n\n");
+
+	int ret = processOpGroup(OPG_GROUP_JOIN, groupName);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+	showStatusMsg(ret, "Create group");
+	
+	Sleep(2000);
 }
+
+void handleLeaveGroup() {
+	char ch;
+	int iRetVal;
+	printf("\n");
+	printf("Are you sure you want to leave this group? (Y/..): ");
+	ch = _getch();
+	if (ch == 'Y' || ch == 'y') {
+		iRetVal = processOpGroup(OPG_GROUP_LEAVE, currentGroup);
+		if (iRetVal == 1) {
+			printf("\nError connecting to server.\n");
+			Sleep(2000);
+			return;
+		}
+		showStatusMsg(iRetVal, "Leave group");
+		Sleep(2000);
+		return;
+	}
+	printf("\nLeave group aborted.");
+	Sleep(2000);
+}
+
+
+/*****************************
+Browsing
+*****************************/
+
+void handleNavigate() {
+	char path[MAX_PATH];
+	printf("\n");
+
+	bool valid;
+	do {
+		valid = true;
+		printf("Path should be %d characters or less.\n", MAX_PATH);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
+		printf("Where to? ");
+		gets_s(path, MAX_PATH);
+	} while (!valid);
+	printf("\n\n");
+
+	int ret = processOpBrowse(OPB_FILE_CD, path);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+
+	showStatusMsg(ret, "Navigating");
+	Sleep(2000);
+}
+
+void handleNewFolder() {
+	char newFolderName[MAX_PATH];
+	printf("\n");
+
+	bool valid;
+	do {
+		valid = true;
+		printf("Folder name should be %d characters or less.\n", MAX_PATH);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
+		printf("New folder name: ");
+		gets_s(newFolderName, MAX_PATH);
+	} while (!valid);
+	printf("\n\n");
+
+	int ret = processOpBrowse(OPB_DIR_NEW, newFolderName);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+
+	showStatusMsg(ret, "Create new folder");
+	Sleep(2000);
+}
+
+void handleUpload() {
+	char fileName[MAX_PATH];
+	printf("\n");
+
+	bool valid;
+	do {
+		valid = true;
+		printf("File name should be %d characters or less.\n", MAX_PATH);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
+		printf("Where to? ");
+		gets_s(fileName, GROUPNAME_SIZE);
+	} while (!valid);
+	printf("\n\n");
+
+	uploadFileToServer(fileName);
+
+	Sleep(2000);
+}
+
+void handleDownload() {
+	char path[MAX_PATH];
+	printf("\n");
+
+	bool valid;
+	do {
+		valid = true;
+		printf("Path should be %d characters or less.\n", MAX_PATH);
+		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
+		printf("Where to? ");
+		gets_s(path, GROUPNAME_SIZE);
+	} while (!valid);
+	printf("\n\n");
+
+	downloadFileFromServer(path);
+
+	Sleep(2000);
+}
+
+
+/*****************************
+Authentication
+*****************************/
 
 void handleLogOut() {
-
-}
-
-
-void logOutUI() {
 	char ch;
 	int iRetVal;
 	printf("\n");
 	printf("Are you sure you want to log out? (Y/..): ");
 	ch = _getch();
 	if (ch == 'Y' || ch == 'y') {
-		iRetVal = reqLogOut();
+		iRetVal = processOpLogOut();
 		if (iRetVal == 1) {
 			printf("\nClient will quit.\n");
 			quit = true;
@@ -184,10 +456,10 @@ void logOutUI() {
 	Sleep(2000);
 }
 
-void logInUI() {
-	printf("Your username and password should be 30 characters or less,\n");
+void handleLogIn() {
+	printf("Your username and password should be %d characters or less,\n", CRE_MAXLEN);
 	printf("and cannot contain spaces.\n");
-	printf("Don't input over 30 characters, else it will be truncated.\n\n");
+	printf("Don't input over %d characters, else it will be truncated.\n\n", CRE_MAXLEN);
 
 	bool valid;
 	do {
@@ -208,7 +480,7 @@ void logInUI() {
 	} while (!valid);
 	printf("\n\n");
 
-	int ret = reqLogIn(username, password);
+	int ret = processOpLogIn(username, password);
 	if (ret == 1) {
 		printf("\nClient will quit.\n");
 		quit = true;
@@ -220,37 +492,25 @@ void logInUI() {
 }
 
 
-int runUI() {
-	Menu();
-	while (1) {
-		handleUserChoice();
-	}
+/*****************************
+Runner
+*****************************/
+void runUI() {
 
 	// Try to reauthenticate
-	// If fail, request new SID from server
 	int iRetVal = processOpReauth();
 	showStatusMsg(iRetVal, "Reauthenticate");
 	if (iRetVal == 1) {
 		return;
 	}
-	else if (iRetVal != RES_OK && iRetVal != RES_RA_FOUND_NOTLI) {
-		iRetVal = reqSid();
-		showStatusMsg(iRetVal, "Request SID");
-		if (iRetVal == 1) {
-			printf("Program will exit.");
-			return;
-		}
-	}
-	Sleep(1000);
 
 	// Main menu loop
 	while (!quit) {
 		if (isLoggedIn)
-			showLoggedInMenu();
+			showMenuLoggedIn();
 		else
-			showLoggedOutMenu();
+			showMenuNotLoggedIn();
 	}
-
 }
 
 #endif

@@ -3,103 +3,159 @@
 #ifndef PROCESSOR_H_
 #define PROCESSOR_H_
 
+#include <iostream>
+#include <vector>
+
+
+using namespace std;
+
 #include "defs.h"
 #include "network.h"
 #include "fileUtils.h"
 
 bool isLoggedIn = false;
-char buff[BUFF_SIZE];
+
+extern MESSAGE gSendMessage;
+extern MESSAGE gRecvMessage;
+// extern MESSAGE message;
 char cookie[COOKIE_LEN];
 
-
-void packMessage(LPMESSAGE message, int opcode, int length, int offset, int burst, char* payload) {
-	message->opcode = opcode;
-	message->length = 0;
-	message->offset = 0;
-	message->burst = 0;
-	strcpy(message->payload, payload);
+void packMessage(int opcode, int length, int offset, int burst, char* payload) {
+	gSendMessage.opcode = opcode;
+	gSendMessage.length = length;
+	gSendMessage.offset = offset;
+	gSendMessage.burst = burst;
+	if (payload != NULL) {
+		strcpy(gSendMessage.payload, payload);
+	}
 }
 
-/*
-Parse response in buff. Extract sid if
-status code is RES_OK. Return status code
-*/
-
-int reqLogIn(char* username, char* password) {
-	MESSAGE message;
+int processOpLogIn(char* username, char* password) {
 	// Construct request
-	packMessage(&message, OPA_USERNAME, strlen(username), 0, 0, username);
+	snprintf(gSendMessage.payload, BUFF_SIZE, "%s %s", username, password);
+	packMessage(OPA_LOGIN, strlen(gSendMessage.payload), 0, 0, NULL);
 
 	// Send
-	if (sendReq(buff, BUFF_SIZE) == 1) {
-		return 1;
-	}
+	handleSent();
+	handleRecv();
+	Sleep(1000);
 
-	// Parse response
-	int iRetVal = parseResponse();
-	if (iRetVal == RES_OK) {
+	if (gRecvMessage.opcode == OPS_OK) {
 		isLoggedIn = true;
 	}
-	return iRetVal;
+	return gRecvMessage.opcode;
+
 }
 
-int reqLogOut() {
-	// Encapsulate request
-	snprintf(buff, BUFF_SIZE, "LOGOUT %s", sid);
-	if (sendReq(buff, BUFF_LEN) == 1) {
-		return 1;
-	}
-	// Parse response
-	int iRetVal = parseResponse();
-	if (iRetVal == RES_OK) {
+int processOpLogOut() {
+	// Construct request
+	packMessage(OPA_LOGOUT, 0, 0, 0, "");
+
+	// Send
+	handleSent();
+	handleRecv();
+
+	if (gRecvMessage.opcode == OPS_OK) {
 		isLoggedIn = false;
 	}
-	return iRetVal;
+	return gRecvMessage.opcode;
 }
 
-int reqReauth() {
+int processOpReauth() {
 	// Read SID from file
-	readCookieFromFile(sid, SID_LEN);
-	if (strlen(sid) != SID_LEN - 1) {
+	readCookieFromFile(cookie, COOKIE_LEN);
+	if (strlen(cookie) != COOKIE_LEN - 1) {
 		return -1;
 	}
 	else {
-		// Encapsulate reauth message
-		snprintf(buff, BUFF_SIZE, "REAUTH %s", sid);
-		if (sendReq(buff, BUFF_LEN) == 1) {
-			return 1;
+		// Construct reauth message
+		packMessage(OPA_REAUTH, COOKIE_LEN, 0, 0, cookie);
+		handleSent();
+		handleRecv();
+
+
+		if (gRecvMessage.opcode == OPS_OK) {
+			isLoggedIn = true;
 		}
 
-		// Parse response
-		int iRetVal = parseResponse();
-		switch (iRetVal) {
-		case RES_OK:
-			isLoggedIn = true;
-			break;
-		case RES_RA_FOUND_NOTLI:
-			isLoggedIn = false;
-			break;
-		default:
-			isLoggedIn = false;
-			sid[0] = 0;		  // Clear saved sid if
-			writeCookietoFile(sid); // sid not found on server
-		}
-		return iRetVal;
+		return gRecvMessage.opcode;
 	}
 }
 
-int reqSid() {
-	// Encapsulate request
-	snprintf(buff, BUFF_LEN, "REQUESTSID");
-	if (sendReq(buff, BUFF_LEN) == 1) {
+int processOpReqCookie() {
+	// Construct reauth message
+	packMessage(OPA_REQ_COOKIES, 0, 0, 0, "");
+	handleSent();
+	handleRecv();
+
+
+	if (gRecvMessage.opcode == OPS_OK) {
+		writeCookietoFile(cookie);
+	}
+
+	return gRecvMessage.opcode;
+}
+
+
+/*****************************
+Group
+*****************************/
+
+int processOpGroup(int opCode, char* groupName) {
+	// Construct reauth message
+	packMessage(opCode, strlen(groupName), 0, 0, groupName);
+	handleSent();
+	handleRecv();
+
+	return gRecvMessage.opcode;
+}
+
+int processOpGroupList(vector<char*> &groupList) {
+	// Construct reauth message
+	packMessage(OPG_GROUP_LIST, 0, 0, 0, "");
+	handleSent();
+	handleRecv();
+
+	int groupCount = 0;
+	if (gRecvMessage.opcode == OPG_GROUP_COUNT) {
+		groupCount = atoi(gRecvMessage.payload);
+	}
+	else {
 		return 1;
 	}
-	// Parse response in buff
-	int iRetVal = parseResponse();
-	if (iRetVal == RES_OK) {
-		writeCookietoFile(sid);
+
+	char* groupName;
+	
+	for (int i = 0; i < groupCount; i++) {
+		handleRecv();
+		Sleep(5000);
+		if (gRecvMessage.opcode == OPG_GROUP_NAME) {
+			groupName = (char*)malloc(GROUPNAME_SIZE);
+			strcpy_s(groupName, GROUPNAME_SIZE, gRecvMessage.payload);
+			groupList.push_back(groupName);
+			packMessage(OPS_CONTINUE, 0, 0, 0, "");
+			handleSent();
+		}
+		else {
+			return 1;
+		}
 	}
-	return (iRetVal != RES_OK);
+
+	return 0;
+}
+
+
+/*****************************
+Browsing
+*****************************/
+
+int processOpBrowse(int opCode, char* path) {
+	// Construct reauth message
+	packMessage(opCode, strlen(path), 0, 0, path);
+	handleSent();
+	handleRecv();
+
+	return gRecvMessage.opcode;
 }
 
 #endif

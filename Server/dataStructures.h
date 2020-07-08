@@ -9,14 +9,16 @@
 
 #define OPA_REAUTH			100
 #define OPA_REQ_COOKIES		101
-#define OPA_USERNAME		110
-#define OPA_PASSWORD		111
+#define OPA_LOGIN			110
 #define OPA_LOGOUT			112
 
 #define OPG_GROUP_USE		200
-#define OPG_GROUP_JOIN		201
-#define OPG_GROUP_LEAVE		202
-#define OPG_GROUP_NEW		210
+#define OPG_GROUP_LIST		201
+#define OPG_GROUP_JOIN		202
+#define OPG_GROUP_LEAVE		203
+#define OPG_GROUP_NEW		204
+#define OPG_GROUP_COUNT		210
+#define OPG_GROUP_NAME		211
 
 #define OPB_LIST			300
 #define OPB_FILE_CD			301
@@ -36,6 +38,7 @@
 
 #define OPS_OK				900
 #define OPS_SUCCESS			901
+#define OPS_CONTINUE		902
 #define OPS_ERR_BADREQUEST	950
 #define OPS_ERR_SERVERFAIL	951
 #define OPS_ERR_FORBIDDEN	953
@@ -70,6 +73,11 @@ typedef struct {
 	char payload[2048];
 } MESSAGE, *LPMESSAGE;
 
+typedef struct _MESSAGE_LIST {
+	MESSAGE mess;
+	struct _MESSAGE_LIST* next = NULL;
+} MESSAGE_LIST, *LPMESSAGE_LIST;
+
 typedef struct {
 	int         gid;
 	char        groupName[GROUPNAME_SIZE];
@@ -95,18 +103,19 @@ typedef struct {
 	char	username[CRE_MAXLEN];
 	char	password[CRE_MAXLEN];
 	char	cookie[COOKIE_LEN];
-	bool	isLocked;
-	bool	isActive;
-	time_t	lastActive;
+	bool	isLocked = 0;
+	bool	isActive = 0;
+	time_t	lastActive = 0;
 	HANDLE	mutex;
 	char	workingDir[MAX_PATH];
-	Group*	workingGroup;
+	Group*	workingGroup = NULL;
+	LPMESSAGE_LIST queuedMess = NULL;
 } Account;
 
 typedef struct {
 	Account*	account;
 	SOCKET      socket;
-	int			numOfAttempts;
+	int			numOfAttempts = 0;
 	time_t		lastAtempt;
 } Attempt;
 

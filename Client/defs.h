@@ -3,16 +3,20 @@
 #ifndef DEFS_H_
 #define DEFS_H_
 
+#include <WinSock2.h>
+
 #define OPA_REAUTH			100
 #define OPA_REQ_COOKIES		101
-#define OPA_USERNAME		110
-#define OPA_PASSWORD		111
+#define OPA_LOGIN			110
 #define OPA_LOGOUT			112
 
 #define OPG_GROUP_USE		200
-#define OPG_GROUP_JOIN		201
-#define OPG_GROUP_LEAVE		202
+#define OPG_GROUP_LIST		201
+#define OPG_GROUP_JOIN		202
+#define OPG_GROUP_LEAVE		203
 #define OPG_GROUP_NEW		210
+#define OPG_GROUP_COUNT		220
+#define OPG_GROUP_NAME		221
 
 #define OPB_LIST			300
 #define OPB_FILE_CD			301
@@ -31,10 +35,13 @@
 #define OPT_FILE_DATA		404
 
 #define OPS_OK				900
+#define OPS_SUCCESS			901
+#define OPS_CONTINUE		902
 #define OPS_ERR_BADREQUEST	950
 #define OPS_ERR_SERVERFAIL	951
 #define OPS_ERR_FORBIDDEN	953
 #define OPS_ERR_NOTFOUND	954
+#define OPS_ERR_FILE_CORRUPTED 955
 
 #define OPS_ERR_LOCKED		960
 #define OPS_ERR_WRONGPASS	961
@@ -44,6 +51,7 @@
 #define OPS_ERR_GROUPEXISTS	971
 #define OPS_ERR_ALREADYEXISTS 980
 
+
 #define GROUPNAME_SIZE 500
 #define FILENAME_SIZE  500
 #define DIGEST_SIZE 33
@@ -51,13 +59,18 @@
 #define COOKIE_LEN		33
 #define BUFF_SIZE		2048
 
+#define BUFF_SIZE                  2048
+#define DATA_BUFSIZE               8192
+#define MAX_SOCK                   10
+#define RECEIVE                    0
+#define SEND                       1
 
 typedef struct {
 	int opcode;
 	unsigned int length;
 	long offset;
 	int burst;
-	char payload[2048];
+	char payload[BUFF_SIZE];
 } MESSAGE, *LPMESSAGE;
 
 typedef struct _SOCKET_INFORMATION {
@@ -79,25 +92,5 @@ typedef struct _FILE_INFORMATION {
 	int nLeft;
 	char *fileBuffer;
 }FILE_INFORMATION, *LPFILE_INFORMATION;
-
-typedef struct message {
-	char opcode;
-	unsigned int length;
-	long offset;
-	char payload[BUFF_SIZE];
-} message;
-
-typedef enum messType {
-	sendingData,
-	uploadFile,
-	downloadFile,
-	fileNameDownload,
-	fileNameUpload,
-	success,
-	fileExist,
-	noFileExist,
-	md5Code,
-	fileCorrupted
-} Type;
 
 #endif

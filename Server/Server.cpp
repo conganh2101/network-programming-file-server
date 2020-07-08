@@ -38,15 +38,15 @@ gInitialAccepts = DEFAULT_OVERLAPPED_COUNT,
 gMaxAccepts = MAX_OVERLAPPED_ACCEPTS,
 gMaxReceives = MAX_OVERLAPPED_RECVS,
 gMaxSends = MAX_OVERLAPPED_SENDS,
-gMaxReads = MAX_OVERLAPPED_READS,
-gMaxWrites = MAX_OVERLAPPED_WRITES;
+gMaxDownloads = MAX_OVERLAPPED_READS,
+gMaxUploads = MAX_OVERLAPPED_WRITES;
 
 char *gBindAddr = NULL,         // local interface to bind to
 *gBindPort = "5500";       // local port to bind to
 
 						   // Statistics counters
 volatile LONG gBytesRead = 0, gBytesSent = 0, gStartTime = 0, gBytesReadLast = 0, gBytesSentLast = 0,
-gStartTimeLast = 0, gConnections = 0, gConnectionsLast = 0, gOutstandingSends = 0, gOutstandingReads = 0, gOutstandingWrites = 0;
+gStartTimeLast = 0, gConnections = 0, gConnectionsLast = 0, gOutstandingSends = 0, gOutstandingDownloads = 0, gOutstandingUploads = 0;
 
 // Serialize access to the free lists below
 CRITICAL_SECTION gBufferListCs, gSocketListCs, gPendingCritSec, gReadingCritSec, gWritingCritSec;
@@ -67,12 +67,12 @@ void dbgprint(char *format, ...);
 void EnqueuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj, int op);
 BUFFER_OBJ *DequeuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, int op);
 void ProcessPendingOperations();
-void EnqueueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj);
-BUFFER_OBJ *DequeueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end);
-void ProcessReadingOperations();
-void EnqueueWritingingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj);
-BUFFER_OBJ *DequeueWritingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end);
-void ProcessWritingOperations();
+void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj);
+BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end);
+void ProcessDownloadingOperations();
+void EnqueueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj);
+BUFFER_OBJ *DequeueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end);
+void ProcessUploadingOperations();
 void InsertPendingAccept(LISTEN_OBJ *listenobj, BUFFER_OBJ *obj);
 void RemovePendingAccept(LISTEN_OBJ *listenobj, BUFFER_OBJ *obj);
 BUFFER_OBJ *GetBufferObj(int buflen);
@@ -113,6 +113,8 @@ int _tmain(int argc, char* argv[])
 		fprintf(stderr, "unable to load Winsock!\n");
 		return -1;
 	}
+
+	if (initializeData()) return 1;
 
 	InitializeCriticalSection(&gSocketListCs);
 	InitializeCriticalSection(&gBufferListCs);
@@ -529,7 +531,7 @@ void EnqueuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *ob
 	return;
 }
 
-void EnqueueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
+void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
 	EnterCriticalSection(&gReadingCritSec);
@@ -550,7 +552,7 @@ void EnqueueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *ob
 	return;
 }
 
-void EnqueueWritingingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
+void EnqueueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
 	EnterCriticalSection(&gWritingCritSec);
@@ -597,7 +599,7 @@ BUFFER_OBJ *DequeuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, int op)
 	return obj;
 }
 
-BUFFER_OBJ *DequeueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
+BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
 	EnterCriticalSection(&gReadingCritSec);
@@ -617,7 +619,7 @@ BUFFER_OBJ *DequeueReadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 	return obj;
 }
 
-BUFFER_OBJ *DequeueWritingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
+BUFFER_OBJ *DequeueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
 	EnterCriticalSection(&gWritingCritSec);
@@ -667,15 +669,15 @@ void ProcessPendingOperations()
 	return;
 }
 
-void ProcessReadingOperations()
+void ProcessDownloadingOperations()
 {
 	BUFFER_OBJ *readobj = NULL;
 	MESSAGE sendMessage;
 	BUFFER_OBJ *sendobj = NULL;
 	BUFFER_OBJ *recvobj = NULL;
-	while (gOutstandingReads < gMaxReads)
+	while (gOutstandingDownloads < gMaxDownloads)
 	{
-		readobj = DequeueReadingOperation(&gPendingReadList, &gPendingReadListEnd);
+		readobj = DequeueDownloadingOperation(&gPendingReadList, &gPendingReadListEnd);
 		if (readobj)
 		{
 			MESSAGE rcvMess;
@@ -767,7 +769,7 @@ void ProcessReadingOperations()
 				PostRecv(readobj->sock, recvobj);
 			}
 			ProcessPendingOperations();
-			InterlockedIncrement(&gOutstandingReads);
+			InterlockedIncrement(&gOutstandingDownloads);
 
 		}
 		else
@@ -778,14 +780,14 @@ void ProcessReadingOperations()
 	return;
 }
 
-void ProcessWritingOperations() {
+void ProcessUploadingOperations() {
 	BUFFER_OBJ *writeobj = NULL;
 	BUFFER_OBJ *rcvobj = NULL;
 	BUFFER_OBJ *sendobj = NULL;
 	MESSAGE sendMessage;
-	while (gOutstandingWrites < gMaxWrites)
+	while (gOutstandingUploads < gMaxUploads)
 	{
-		writeobj = DequeueWritingOperation(&gPendingWriteList, &gPendingWriteListEnd);
+		writeobj = DequeueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd);
 		if (writeobj)
 		{
 
@@ -900,7 +902,7 @@ void ProcessWritingOperations() {
 			}
 			ProcessPendingOperations();
 			//ProcessPendingOperations();
-			InterlockedIncrement(&gOutstandingWrites);
+			InterlockedIncrement(&gOutstandingUploads);
 
 		}
 		else
@@ -1346,6 +1348,7 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 					FreeSocketObj(sockobj);
 				}
 			}
+
 		}
 		else
 		{
@@ -1397,25 +1400,39 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 				return;
 			}
 			MESSAGE *rcvMess;
-			rcvMess = (LPMESSAGE)buf->buf;
+			//MESSAGE sendMessage;
+			rcvMess = (MESSAGE *)buf->buf;
 			fprintf(stderr, "begin\n");
 
-			switch (rcvMess->opcode) {
-				case OPT_FILE_DOWN:
-					readobj = buf;
-					//writeobj->buf = (char *)rcvMess;
-					readobj->sock = clientobj;
-					readobj->sock->mess = *rcvMess;
-					EnqueueReadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
-					break;
-				case OPT_FILE_UP:
-					recvobj = buf;
-					recvobj->sock = clientobj;
-					recvobj->sock->mess = *rcvMess;
-					EnqueueWritingingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
-				default:
-					parseAndProcess(buf);
-					...
+			if (rcvMess->opcode == OPT_FILE_DOWN)
+			{
+
+				InterlockedDecrement(&gOutstandingDownloads);
+				readobj = buf;
+				//writeobj->buf = (char *)rcvMess;
+				readobj->sock = clientobj;
+				readobj->sock->mess = *rcvMess;
+				EnqueueDownloadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
+
+			}
+			else if (rcvMess->opcode == OPT_FILE_UP)
+			{
+				InterlockedDecrement(&gOutstandingUploads);
+				recvobj = buf;
+				recvobj->sock = clientobj;
+				recvobj->sock->mess = *rcvMess;
+				EnqueueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
+
+			}
+			else if (rcvMess->opcode == OPA_LOGIN || rcvMess->opcode == OPA_REAUTH) {
+				recvobj = buf;
+				recvobj->sock = clientobj;
+				recvobj->sock->mess = *rcvMess;
+
+				if (parseAndProcess(recvobj)) {
+					EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, recvobj, OP_WRITE);
+					ProcessPendingOperations();
+				}
 			}
 
 		}
@@ -1460,55 +1477,59 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 			InterlockedExchangeAdd(&gBytesReadLast, BytesTransfered);
 			if (BytesTransfered == sizeof(MESSAGE))
 			{
-				LPMESSAGE rcvMess;
-				rcvMess = (LPMESSAGE)buf->buf;
+				MESSAGE *rcvMess;
+				rcvMess = (MESSAGE *)buf->buf;
 				if (rcvMess->opcode == OPS_OK)
 				{
-
-					InterlockedDecrement(&gOutstandingReads);
+					InterlockedDecrement(&gOutstandingDownloads);
 
 					readobj = buf;
 					readobj->buflen = sizeof(MESSAGE);
 					readobj->sock = sockobj;
 					readobj->sock->mess = *rcvMess;
-					EnqueueReadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
-
-
-
+					EnqueueDownloadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
 				}
 				else if (rcvMess->opcode == OPT_FILE_DATA)
 				{
 					if (rcvMess->length == 0)
 					{
+						InterlockedDecrement(&gOutstandingUploads);
 						recvobj = buf;
 						recvobj->sock = sockobj;
 						recvobj->sock->mess = *rcvMess;
-						EnqueueWritingingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
+						EnqueueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
 
 					}
 					else
 					{
-
-						InterlockedDecrement(&gOutstandingWrites);
+						InterlockedDecrement(&gOutstandingUploads);
 						writeobj = buf;
 						writeobj->sock = sockobj;
 						writeobj->sock->mess = *rcvMess;
-						EnqueueWritingingOperation(&gPendingWriteList, &gPendingWriteListEnd, writeobj);
-
+						EnqueueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd, writeobj);
 					}
-
 				}
 				else if (rcvMess->opcode == OPT_FILE_DIGEST)
 				{
-
+					InterlockedDecrement(&gOutstandingUploads);
 					recvobj = buf;
 					recvobj->sock = sockobj;
 					recvobj->sock->mess = *rcvMess;
-					EnqueueWritingingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
+					EnqueueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
+				}
+				else {
+					recvobj = buf;
+					recvobj->sock = clientobj;
+					recvobj->sock->mess = *rcvMess;
+
+					if (parseAndProcess(recvobj)) {
+						EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, recvobj, OP_WRITE);
+						ProcessPendingOperations();
+					}
 
 				}
-			}
 
+			}
 		}
 		else
 		{
@@ -1528,7 +1549,6 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 			LeaveCriticalSection(&sockobj->SockCritSec);
 		}
 	}
-
 	else if (buf->operation == OP_WRITE)
 	{
 		fprintf(stderr, "wrtting:");
@@ -1538,28 +1558,22 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 		// Update the counters
 		InterlockedExchangeAdd(&gBytesSent, BytesTransfered);
 		InterlockedExchangeAdd(&gBytesSentLast, BytesTransfered);
-
 		buf->buflen = gBufferSize;
 		if (sockobj->bClosing == FALSE)
 		{
-			LPMESSAGE queueMessage;
-			queueMessage = (LPMESSAGE)buf->buf;
+			MESSAGE *queueMessage;
+			queueMessage = (MESSAGE *)buf->buf;
 			if (queueMessage->opcode == OPT_FILE_DATA)
 			{
 				MESSAGE sendMessage;
 				if (sockobj->fileTransfer.nLeft > 0)
 				{
-
-					InterlockedDecrement(&gOutstandingReads);
-
+					InterlockedDecrement(&gOutstandingDownloads);
 					readobj = buf;
 					readobj->buflen = sizeof(MESSAGE);
 					readobj->sock = sockobj;
 					readobj->sock->mess = *queueMessage;
-
-					EnqueueReadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
-
-
+					EnqueueDownloadingOperation(&gPendingReadList, &gPendingReadListEnd, readobj);
 				}
 				else if (sockobj->fileTransfer.nLeft == 0)
 				{
@@ -1581,23 +1595,24 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 			}
 			else if (queueMessage->opcode == OPT_FILE_DIGEST)
 			{
-				fprintf(stderr, "checking download");
+				InterlockedDecrement(&gOutstandingDownloads);
 				recvobj = buf;
 				recvobj->sock = sockobj;
 				recvobj->sock->mess = *queueMessage;
-				EnqueueReadingOperation(&gPendingReadList, &gPendingReadListEnd, recvobj);
-
-
+				EnqueueDownloadingOperation(&gPendingReadList, &gPendingReadListEnd, recvobj);
 			}
 			else if (queueMessage->opcode == OPS_OK)
 			{
+				InterlockedDecrement(&gOutstandingUploads);
 				fprintf(stderr, "checking upload");
 				recvobj = buf;
 				recvobj->sock = sockobj;
 				recvobj->sock->mess = *queueMessage;
-				EnqueueWritingingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
-
-
+				EnqueueUploadingOperation(&gPendingWriteList, &gPendingWriteListEnd, recvobj);
+			}
+			else {
+				buf->sock = sockobj;
+				PostRecv(sockobj, buf);
 			}
 		}
 	}
@@ -1682,7 +1697,7 @@ unsigned __stdcall workerReadThread(void *param)
 {
 	while (TRUE)
 	{
-		ProcessReadingOperations();
+		ProcessDownloadingOperations();
 	}
 }
 
@@ -1690,6 +1705,7 @@ unsigned __stdcall workerWriteThread(void *param)
 {
 	while (TRUE)
 	{
-		ProcessWritingOperations();
+		ProcessUploadingOperations();
 	}
 }
+
