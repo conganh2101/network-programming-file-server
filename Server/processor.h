@@ -27,9 +27,9 @@ int initializeData() {
 
 void packMessage(LPMESSAGE message, int opcode, int length, int offset, int burst, char* payload) {
 	message->opcode = opcode;
-	message->length = 0;
-	message->offset = 0;
-	message->burst = 0;
+	message->length = length;
+	message->offset = offset;
+	message->burst = burst;
 	strcpy(message->payload, payload);
 }
 
@@ -51,8 +51,8 @@ void generateCookies(char* cookie) {
 		cookie[COOKIE_LEN - 1] = 0;
 
 		// Check if duplicate
-		for (std::list<Attempt>::iterator it = attemptList.begin(); it != attemptList.end(); it++) {
-			if (strcmp(it->account->cookie, cookie) == 0) {
+		for (auto it = accountList.begin(); it != accountList.end(); it++) {
+			if (strcmp(it->cookie, cookie) == 0) {
 				duplicate = true;
 				break;
 			}
@@ -138,7 +138,7 @@ int processOpLogIn(BUFFER_OBJ* bufferObj) {
 	}
 
 	// Check password
-	if (strcmp(account->password, message->payload) != 0) {
+	if (strcmp(account->password, password) != 0) {
 		printf("Wrong password!\n");
 
 		// Check if has attempt before
@@ -186,6 +186,7 @@ int processOpLogIn(BUFFER_OBJ* bufferObj) {
 	// Passed all checks. Update active time and session account info
 	account->lastActive = now;
 	account->isActive = true;
+	socketAccountMap[bufferObj->sock->s] = account;
 	printf("Login successful.\n");
 	packMessage(message, OPS_OK, 0, 0, 0, "");
 	ReleaseMutex(account->mutex);
@@ -355,13 +356,13 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 		return 1;
 	}
 	Account* account = accountSearch->second;
-	std::list<Group> groupList;
-	auto it = groupList.begin();
+	std::list<Group> tempGroupList;
+	auto it = tempGroupList.begin();
 
 	switch (message->opcode) {
 	case OPG_GROUP_LIST:
 
-		if (queryGroupForAccount(account, groupList)) {
+		if (queryGroupForAccount(account, tempGroupList)) {
 			packMessage(message, OPS_ERR_SERVERFAIL, 0, 0, 0, "");
 			return 1;
 		}
@@ -371,26 +372,27 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 		LPMESSAGE_LIST listPtr;
 
 		// Send group count
-		_itoa(groupList.size(), count, 10);
+		_itoa(tempGroupList.size(), count, 10);
 		packMessage(message, OPG_GROUP_COUNT, 0, 0, 0, count);
 
 		// Add directory count to wait queue
-		if (!groupList.empty()) {
-			packMessage(&newMessage, OPG_GROUP_NAME, strlen(groupList.front().groupName), 0, 0, groupList.front().groupName);
+		if (!tempGroupList.empty()) {
+			packMessage(&newMessage, OPG_GROUP_NAME, strlen(tempGroupList.front().groupName), 0, 0, tempGroupList.front().groupName);
 			account->queuedMess = (LPMESSAGE_LIST)malloc(sizeof(MESSAGE_LIST));
 			listPtr = account->queuedMess;
 			listPtr->mess = newMessage;
-		}
 
-		it = groupList.begin();
-		it++;
-		// Add file name to wait queue
-		for ( ; it != groupList.end(); it++) {
-			packMessage(&newMessage, OPG_GROUP_NAME, strlen((*it).groupName), 0, 0, (*it).groupName);
-			listPtr->next = (LPMESSAGE_LIST)malloc(sizeof(MESSAGE_LIST));
-			listPtr = listPtr->next;
-			listPtr->mess = newMessage;
+			it = tempGroupList.begin();
+			it++;
+			// Add file name to wait queue
+			for ( ; it != tempGroupList.end(); it++) {
+				packMessage(&newMessage, OPG_GROUP_NAME, strlen((*it).groupName), 0, 0, (*it).groupName);
+				listPtr->next = (LPMESSAGE_LIST)malloc(sizeof(MESSAGE_LIST));
+				listPtr = listPtr->next;
+				listPtr->mess = newMessage;
+			}
 		}
+		return 1;
 
 	case OPG_GROUP_USE:
 		ret = accountHasAccessToGroupDb(account, message->payload);
@@ -403,7 +405,7 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 			for (auto it = groupList.begin(); it != groupList.end(); ++it) {
 				if (strcmp(it->groupName, message->payload) == 0) {
 					account->workingGroup = &(*it);
-					strcpy_s(account->workingDir, MAX_PATH, account->workingGroup->pathName);
+					account->workingDir[0] = 0;
 					break;
 				}
 			}
@@ -483,6 +485,13 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 		return 1;
 
 	case OPG_GROUP_NEW:
+
+		// Verify group name:
+		if (message->length == 0) {
+			packMessage(message, OPS_ERR_BADREQUEST, 0, 0, 0, "");
+			return 1;
+		}
+
 		for (auto it = groupList.begin(); it != groupList.end(); ++it) {
 			if (strcmp(it->groupName, message->payload) == 0) {
 				group = &(*it);
@@ -498,12 +507,16 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 		Group newGroup;
 		newGroup.ownerId = account->uid;
 		strcpy_s(newGroup.groupName, GROUPNAME_SIZE, message->payload);
+
+		char path[MAX_PATH];
+		strcpy_s(newGroup.pathName, MAX_PATH, newGroup.groupName);
+
 		while (1) {
-			strcpy_s(newGroup.pathName, MAX_PATH, strcat(STORAGE_LOCATION, newGroup.groupName));
-			if (CreateDirectoryA(newGroup.pathName, NULL)) {
+			snprintf(path, MAX_PATH, "%s/%s", STORAGE_LOCATION, newGroup.pathName);
+			if (CreateDirectoryA(path, NULL) == 0) {
 				if (GetLastError() == ERROR_ALREADY_EXISTS) {
-					printf("Cannot create directory with path %s as it already exists", newGroup.pathName);
-					strcat_s(newGroup.groupName, GROUPNAME_SIZE, "_");
+					printf("Cannot create directory with path %s as it already exists", path);
+					strcat_s(newGroup.pathName, GROUPNAME_SIZE, "_");
 					continue;
 				}
 				else {
@@ -511,13 +524,22 @@ int processOpGroup(BUFFER_OBJ* bufferObj) {
 					return 1;
 				}
 			}
-				break;
+			break;
 		}
 
 		// Add group to database
 		if (addGroupDb(&newGroup)) {
-			if (RemoveDirectoryA(newGroup.pathName)) {
+			if (RemoveDirectoryA(newGroup.pathName) == 0) {
 				printf("Cannot remove directory with path %s. Error code %d!",newGroup.pathName, GetLastError());
+			}
+			packMessage(message, OPS_ERR_SERVERFAIL, 0, 0, 0, "");
+			return 1;
+		}
+
+		// Add user to group
+		if (addUserToGroupDb(account, &newGroup)) {
+			if (RemoveDirectoryA(newGroup.pathName) == 0) {
+				printf("Cannot remove directory with path %s. Error code %d!", newGroup.pathName, GetLastError());
 			}
 			packMessage(message, OPS_ERR_SERVERFAIL, 0, 0, 0, "");
 			return 1;
@@ -543,6 +565,10 @@ int processOpContinue(BUFFER_OBJ* bufferObj) {
 		LPMESSAGE_LIST ptr = account->queuedMess->next;
 		free(account->queuedMess);
 		account->queuedMess = ptr;
+		return 1;
+	}
+	else {
+		packMessage(&(bufferObj->sock->mess), OPS_ERR_BADREQUEST, 0, 0, 0, "");
 		return 1;
 	}
 	return 0;
@@ -577,8 +603,11 @@ int processOpBrowsing(BUFFER_OBJ* bufferObj) {
 	case OPB_LIST:
 		MESSAGE newMessage;
 
-		strcpy_s(path, MAX_PATH, account->workingDir);
-		strcat_s(path, MAX_PATH, message->payload);
+		snprintf(path, MAX_PATH, "%s/%s", STORAGE_LOCATION, account->workingGroup->pathName);
+		if (strlen(account->workingDir) > 0) {
+			snprintf(path, MAX_PATH, "%s/%s", path, account->workingDir);
+		}
+		strcat_s(path, MAX_PATH, "/*");
 
 		hFind = FindFirstFileA(path, &FindFileData);
 		if (hFind == INVALID_HANDLE_VALUE) {
@@ -590,7 +619,7 @@ int processOpBrowsing(BUFFER_OBJ* bufferObj) {
 		}
 		else {
 			while (1) {
-				if (FindFileData.dwFileAttributes && FILE_ATTRIBUTE_DIRECTORY) {
+				if (FindFileData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
 					packMessage(&newMessage, OPB_DIR_NAME, strlen(FindFileData.cFileName), 0, 0, FindFileData.cFileName);
 					folderList.push_back(newMessage);
 				}
@@ -622,6 +651,7 @@ int processOpBrowsing(BUFFER_OBJ* bufferObj) {
 		packMessage(message, OPB_FILE_COUNT, 0, 0, 0, count);
 
 		// Add directory count to wait queue
+		_itoa(folderList.size(), count, 10);
 		packMessage(&newMessage, OPB_DIR_COUNT, 0, 0, 0, count);
 		account->queuedMess = (LPMESSAGE_LIST)malloc(sizeof(MESSAGE_LIST));
 		listPtr = account->queuedMess;
@@ -635,7 +665,7 @@ int processOpBrowsing(BUFFER_OBJ* bufferObj) {
 		}
 		
 		// Add directory name to wait queue
-		for (auto it = folderList.begin(); it != fileList.end(); it++) {
+		for (auto it = folderList.begin(); it != folderList.end(); it++) {
 			listPtr->next = (LPMESSAGE_LIST)malloc(sizeof(MESSAGE_LIST));
 			listPtr = listPtr->next;
 			listPtr->mess = *it;
@@ -746,6 +776,7 @@ int parseAndProcess(BUFFER_OBJ* bufferObj) {
 	case OPA_LOGOUT:
 		return processOpLogOut(bufferObj);
 
+	case OPG_GROUP_LIST:
 	case OPG_GROUP_USE:
 	case OPG_GROUP_JOIN:
 	case OPG_GROUP_LEAVE:

@@ -1,9 +1,4 @@
 ﻿  stdafx.cpp
   Client.cpp
-d:\hust\20192\it4060 lap trinh mang\btl\client\network.h(227): warning C4101: 'Flags': unreferenced local variable
-d:\hust\20192\it4060 lap trinh mang\btl\client\network.h(226): warning C4101: 'sendBytes': unreferenced local variable
-d:\hust\20192\it4060 lap trinh mang\btl\client\network.h(226): warning C4101: 'recvBytes': unreferenced local variable
-d:\hust\20192\it4060 lap trinh mang\btl\client\network.h(344): warning C4101: 'Flags': unreferenced local variable
-d:\hust\20192\it4060 lap trinh mang\btl\client\network.h(343): warning C4101: 'recvBytes': unreferenced local variable
   Client.vcxproj -> D:\HUST\20192\IT4060 Lap trinh mang\BTL\Debug\Client.exe
   Client.vcxproj -> D:\HUST\20192\IT4060 Lap trinh mang\BTL\Debug\Client.pdb (Full PDB)

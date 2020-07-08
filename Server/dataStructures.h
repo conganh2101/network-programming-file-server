@@ -59,7 +59,7 @@
 #define CRE_MAXLEN	256
 #define COOKIE_LEN		33
 
-#define STORAGE_LOCATION "/"
+#define STORAGE_LOCATION "Server"
 
 #define TIME_1_DAY				86400
 #define TIME_1_HOUR				3600

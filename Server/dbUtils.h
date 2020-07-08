@@ -33,7 +33,9 @@ int openDb() {
 	return 0;
 }
 
-
+/*
+Return 0 if success
+*/
 int readAccountDb(std::list<Account>& accList) {
 	Account acc;
 	sqlite3_stmt *res;
@@ -64,6 +66,9 @@ int readAccountDb(std::list<Account>& accList) {
 	return 0;
 }
 
+/*
+Return 0 if success
+*/
 int readGroupDb(std::list<Group>& groupList) {
 	Group group;
 	sqlite3_stmt *res;
@@ -83,8 +88,8 @@ int readGroupDb(std::list<Group>& groupList) {
 	while (sqlite3_step(res) == SQLITE_ROW) {
 		group.gid = sqlite3_column_int(res, 0);
 		strcpy_s(group.groupName, CRE_MAXLEN, (const char *)sqlite3_column_text(res, 1));
-		group.ownerId = sqlite3_column_int(res, 2);
-		strcpy_s(group.pathName, MAX_PATH, (const char *)sqlite3_column_text(res, 3));
+		strcpy_s(group.pathName, MAX_PATH, (const char *)sqlite3_column_text(res, 2));
+		group.ownerId = sqlite3_column_int(res, 3);
 
 		groupList.push_back(group);
 	}
@@ -94,6 +99,10 @@ int readGroupDb(std::list<Group>& groupList) {
 	return 0;
 }
 
+/*
+Return 1/0 if has access or not
+Return -1 if server fails
+*/
 int accountHasAccessToGroupDb(Account* account, char* groupName) {
 	sqlite3_stmt *res;
 	int ret;
@@ -103,7 +112,7 @@ int accountHasAccessToGroupDb(Account* account, char* groupName) {
 		return -1;
 	}
 
-	char *sql = "SELECT gm.GID, gm.UID FROM GROUPMEMBER gm"
+	char *sql = "SELECT gm.GID, gm.UID FROM GROUPMEMBER gm "
 		"JOIN [GROUP] g ON g.GID = gm.GID "
 		"WHERE gm.UID = ? AND g.GROUPNAME = ?;";
 
@@ -122,6 +131,9 @@ int accountHasAccessToGroupDb(Account* account, char* groupName) {
 	return ret;
 }
 
+/*
+Return 0 if success
+*/
 int queryGroupForAccount(Account* account, std::list<Group> &groupList) {
 	sqlite3_stmt *res;
 	int ret;
@@ -131,7 +143,7 @@ int queryGroupForAccount(Account* account, std::list<Group> &groupList) {
 		return -1;
 	}
 
-	char *sql = "SELECT g.GID, g.GROUPNAME FROM GROUPMEMBER gm"
+	char *sql = "SELECT g.GID, g.GROUPNAME FROM GROUPMEMBER gm "
 		"JOIN [GROUP] g ON g.GID = gm.GID "
 		"WHERE gm.UID = ?;";
 
@@ -155,6 +167,9 @@ int queryGroupForAccount(Account* account, std::list<Group> &groupList) {
 	return ret;
 }
 
+/*
+Return 0 if success
+*/
 int addUserToGroupDb(Account* account, Group* group) {
 	sqlite3_stmt *res;
 	int ret;
@@ -174,7 +189,7 @@ int addUserToGroupDb(Account* account, Group* group) {
 		sqlite3_bind_int(res, 2, account->uid);
 	}
 
-	ret = (sqlite3_step(res) == SQLITE_DONE);
+	ret = (sqlite3_step(res) != SQLITE_DONE);
 
 	sqlite3_finalize(res);
 	return ret;
@@ -199,7 +214,7 @@ int deleteUserFromGroupDb(Account* account, Group* group) {
 		sqlite3_bind_int(res, 2, group->gid);
 	}
 
-	ret = (sqlite3_step(res) == SQLITE_DONE);
+	ret = (sqlite3_step(res) != SQLITE_DONE);
 
 	sqlite3_finalize(res);
 	return ret;
@@ -225,7 +240,7 @@ int addGroupDb(Group* group) {
 		sqlite3_bind_int(res, 3, group->ownerId);
 	}
 
-	ret = (sqlite3_step(res) == SQLITE_DONE);
+	ret = (sqlite3_step(res) != SQLITE_DONE);
 
 	sqlite3_finalize(res);
 	group->gid = (int) sqlite3_last_insert_rowid(db);
@@ -251,7 +266,7 @@ int lockAccountDb(Account* account) {
 		sqlite3_bind_int(res, 1, account->uid);
 	}
 
-	ret = (sqlite3_step(res) == SQLITE_DONE);
+	ret = (sqlite3_step(res) != SQLITE_DONE);
 
 	sqlite3_finalize(res);
 

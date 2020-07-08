@@ -17,6 +17,9 @@ bool isLoggedIn = false;
 
 extern MESSAGE gSendMessage;
 extern MESSAGE gRecvMessage;
+
+extern WSAEVENT waitRecv;
+
 // extern MESSAGE message;
 char cookie[COOKIE_LEN];
 
@@ -38,13 +41,16 @@ int processOpLogIn(char* username, char* password) {
 	// Send
 	handleSent();
 	handleRecv();
-	Sleep(1000);
+
+
 
 	if (gRecvMessage.opcode == OPS_OK) {
 		isLoggedIn = true;
 	}
-	return gRecvMessage.opcode;
 
+	Sleep(1000);
+
+	return gRecvMessage.opcode;
 }
 
 int processOpLogOut() {
@@ -54,6 +60,8 @@ int processOpLogOut() {
 	// Send
 	handleSent();
 	handleRecv();
+
+
 
 	if (gRecvMessage.opcode == OPS_OK) {
 		isLoggedIn = false;
@@ -73,7 +81,6 @@ int processOpReauth() {
 		handleSent();
 		handleRecv();
 
-
 		if (gRecvMessage.opcode == OPS_OK) {
 			isLoggedIn = true;
 		}
@@ -88,8 +95,8 @@ int processOpReqCookie() {
 	handleSent();
 	handleRecv();
 
-
 	if (gRecvMessage.opcode == OPS_OK) {
+		strcpy_s(cookie, gRecvMessage.payload);
 		writeCookietoFile(cookie);
 	}
 
@@ -107,6 +114,7 @@ int processOpGroup(int opCode, char* groupName) {
 	handleSent();
 	handleRecv();
 
+
 	return gRecvMessage.opcode;
 }
 
@@ -116,25 +124,29 @@ int processOpGroupList(vector<char*> &groupList) {
 	handleSent();
 	handleRecv();
 
+
+
 	int groupCount = 0;
-	if (gRecvMessage.opcode == OPG_GROUP_COUNT) {
-		groupCount = atoi(gRecvMessage.payload);
+	if (gRecvMessage.opcode != OPG_GROUP_COUNT) {
+		return gRecvMessage.opcode;
 	}
-	else {
-		return 1;
-	}
+
+	groupCount = atoi(gRecvMessage.payload);
+
 
 	char* groupName;
 	
 	for (int i = 0; i < groupCount; i++) {
+
+		packMessage(OPS_CONTINUE, 0, 0, 0, "");
+		handleSent();
 		handleRecv();
-		Sleep(5000);
+
+
 		if (gRecvMessage.opcode == OPG_GROUP_NAME) {
 			groupName = (char*)malloc(GROUPNAME_SIZE);
 			strcpy_s(groupName, GROUPNAME_SIZE, gRecvMessage.payload);
 			groupList.push_back(groupName);
-			packMessage(OPS_CONTINUE, 0, 0, 0, "");
-			handleSent();
 		}
 		else {
 			return 1;
@@ -156,6 +168,69 @@ int processOpBrowse(int opCode, char* path) {
 	handleRecv();
 
 	return gRecvMessage.opcode;
+}
+
+int processOpFileList(vector<char*> &fileList, vector<char*> &dirList) {
+	// Construct reauth message
+	packMessage(OPB_LIST, 0, 0, 0, "");
+	handleSent();
+	handleRecv();
+
+	int fileCount = 0, dirCount = 0;
+
+	if (gRecvMessage.opcode != OPB_FILE_COUNT) {
+		return gRecvMessage.opcode;
+	}
+
+	fileCount = atoi(gRecvMessage.payload);
+
+	packMessage(OPS_CONTINUE, 0, 0, 0, "");
+	handleSent();
+	handleRecv();
+
+	// Receive dir count
+
+	if (gRecvMessage.opcode != OPB_DIR_COUNT) {
+		return gRecvMessage.opcode;
+	}
+
+	dirCount = atoi(gRecvMessage.payload);
+
+	char* itemName;
+
+	for (int i = 0; i < fileCount; i++) {
+
+		packMessage(OPS_CONTINUE, 0, 0, 0, "");
+		handleSent();
+		handleRecv();
+
+		if (gRecvMessage.opcode == OPB_FILE_NAME) {
+			itemName = (char*)malloc(FILENAME_SIZE);
+			strcpy_s(itemName, FILENAME_SIZE, gRecvMessage.payload);
+			fileList.push_back(itemName);
+		}
+		else {
+			return 1;
+		}
+	}
+
+	for (int i = 0; i < dirCount; i++) {
+
+		packMessage(OPS_CONTINUE, 0, 0, 0, "");
+		handleSent();
+		handleRecv();
+
+		if (gRecvMessage.opcode == OPB_DIR_NAME) {
+			itemName = (char*)malloc(FILENAME_SIZE);
+			strcpy_s(itemName, FILENAME_SIZE, gRecvMessage.payload);
+			dirList.push_back(itemName);
+		}
+		else {
+			return 1;
+		}
+	}
+
+	return 0;
 }
 
 #endif

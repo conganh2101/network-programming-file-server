@@ -44,6 +44,8 @@ void handleRecv();
 void uploadFileToServer(char *filePath);
 void downloadFileFromServer(char *filePath);
 
+extern char cookie[COOKIE_LEN];
+
 LPSOCKET_INFORMATION downloadSockets[MAX_SOCK];
 LPFILE_INFORMATION downloadFiles[MAX_SOCK];
 int nDownloadSockets = 0;
@@ -67,6 +69,9 @@ WSAEVENT connUploadEvent;
 WSAEVENT connDownloadEvent;
 WSAEVENT connHandleSent;
 WSAEVENT connHandleRecv;
+WSAEVENT waitRecv;
+WSAEVENT waitSend;
+
 
 int opcode;
 
@@ -117,6 +122,19 @@ int initializeNetwork(int argc, char** argv)
 		return 1;
 	}
 
+	if ((waitRecv = WSACreateEvent()) == WSA_INVALID_EVENT)
+	{
+		printf("WSACreateEvent() failed with error %d\n", WSAGetLastError());
+		return 1;
+	}
+
+
+	if ((waitSend = WSACreateEvent()) == WSA_INVALID_EVENT)
+	{
+		printf("WSACreateEvent() failed with error %d\n", WSAGetLastError());
+		return 1;
+	}
+
 	// Create a worker thread to service completed I/O requests	
 	_beginthreadex(0, 0, workerDownloadThread, (LPVOID)connDownloadEvent, 0, 0);
 	_beginthreadex(0, 0, workerUploadThread, (LPVOID)connUploadEvent, 0, 0);
@@ -149,6 +167,13 @@ void handleSent()
 		exit(1);
 	}
 
+	WaitForSingleObject(waitSend, INFINITE);
+
+	if (WSAResetEvent(waitSend) == FALSE) {
+		printf("WSASetEvent() failed with error %d\n", WSAGetLastError());
+		exit(1);
+	}
+
 }
 
 void handleRecv()
@@ -159,6 +184,14 @@ void handleRecv()
 		exit(1);
 	}
 
+	WaitForSingleObject(waitRecv, INFINITE);
+
+	if (WSAResetEvent(waitRecv) == FALSE) {
+		printf("WSASetEvent() failed with error %d\n", WSAGetLastError());
+		exit(1);
+	}
+
+	return;
 }
 
 
@@ -223,8 +256,8 @@ unsigned __stdcall workerRecvThread(LPVOID lpParameter)
 
 void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
-	DWORD sendBytes, recvBytes;
-	DWORD Flags;
+	// DWORD sendBytes, recvBytes;
+	// DWORD Flags;
 
 	LPSOCKET_INFORMATION sockInfo = (LPSOCKET_INFORMATION)overlapped;
 
@@ -272,9 +305,23 @@ void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLA
 		{// if receive message to annouce result from server
 		 // process the information
 
+		 // process the information
+
 			MESSAGE  *recvMessage;
 			recvMessage = (MESSAGE *)sockInfo->dataBuff.buf;
 			gRecvMessage = *recvMessage;
+
+			if (WSASetEvent(waitRecv) == FALSE) {
+				printf("WSASetEvent() failed with error %d\n", WSAGetLastError());
+				exit(1);
+			}
+
+			/*
+			if (WSAResetEvent(waitRecv) == FALSE) {
+				printf("WSASetEvent() failed with error %d\n", WSAGetLastError());
+				exit(1);
+			}
+			*/
 			return;
 		}
 	}
@@ -340,8 +387,9 @@ unsigned __stdcall workerSentThread(LPVOID lpParameter)
 
 void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
-	DWORD sendBytes, recvBytes;
-	DWORD Flags;
+	DWORD sendBytes;
+	// DWORD recvBytes;
+	// DWORD Flags;
 
 	LPSOCKET_INFORMATION sockInfo = (LPSOCKET_INFORMATION)overlapped;
 
@@ -400,6 +448,12 @@ void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLA
 		}
 		else if (sockInfo->sentBytes == sizeof(MESSAGE))
 		{// after sent bytes equal to message size
+
+			if (WSASetEvent(waitSend) == FALSE) {
+				printf("WSASetEvent() failed with error %d\n", WSAGetLastError());
+				exit(1);
+			}
+
 			return;
 		}
 	}
@@ -407,7 +461,9 @@ void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLA
 
 
 void downloadFileFromServer(char *filepath) {
-	strcpy_s(name, filepath);
+
+	strcpy_s(name, "screenshot.png");
+
 	if ((client = WSASocket(AF_INET, SOCK_STREAM, 0, NULL, 0, WSA_FLAG_OVERLAPPED)) == INVALID_SOCKET) {
 		printf("Failed to get a socket %d\n", WSAGetLastError());
 		exit(1);
@@ -431,10 +487,13 @@ void downloadFileFromServer(char *filepath) {
 }
 
 void uploadFileToServer(char *filepath) {
-	strcpy_s(name, filepath);
+	// strcpy_s(name,  filepath);
 
 	FILE *file;
+	strcpy_s(name, "rfc.txt");
 	file = fopen(name, "rb");
+	// file = fopen("rfc.txt", "rb");
+
 	if (!file)
 	{
 		fprintf(stderr, "Unable to open file %s", name);
@@ -533,8 +592,9 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		}
 
 		fread(uploadFiles[nUploadSockets]->fileBuffer, uploadFiles[nUploadSockets]->fileLen, 1, file);
-		strcpy_s(sendMessage.payload, uploadFiles[nUploadSockets]->fileName);
-		sendMessage.length = strlen(uploadFiles[nUploadSockets]->fileName);
+		snprintf(sendMessage.payload, BUFF_SIZE, "%s %s", cookie, uploadFiles[nUploadSockets]->fileName);
+		// strcpy_s(sendMessage.payload, uploadFiles[nUploadSockets]->fileName);
+		sendMessage.length = strlen(sendMessage.payload);
 		memcpy(uploadSockets[nUploadSockets]->buff, &sendMessage, sizeof(MESSAGE));
 
 		fclose(file);
@@ -1004,8 +1064,9 @@ unsigned __stdcall workerDownloadThread(LPVOID lpParameter)
 		MESSAGE sendMessage;
 		sendMessage.opcode = OPT_FILE_DOWN;
 
-		strcpy_s(sendMessage.payload, downloadFiles[nDownloadSockets]->fileName);
-		sendMessage.length = strlen(downloadFiles[nDownloadSockets]->fileName);
+		snprintf(sendMessage.payload, BUFF_SIZE, "%s %s", cookie, downloadFiles[nDownloadSockets]->fileName);
+		// strcpy_s(sendMessage.payload, downloadFiles[nDownloadSockets]->fileName);
+		sendMessage.length = strlen(sendMessage.payload);
 		memcpy(downloadSockets[nDownloadSockets]->buff, &sendMessage, sizeof(MESSAGE));
 
 		// gui message moi vs payload la ten file

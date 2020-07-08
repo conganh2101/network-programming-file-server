@@ -96,18 +96,21 @@ void showStatusMsg(int statusCode, char* opType) {
 	case OPS_ERR_NOTFOUND:
 		printf("Item not found.\n");
 		return;
+	default:
+		printf("Unknown return code from Server: %d\n", statusCode);
+		return;
 	}
 }
 
 void showMenuNotLoggedIn() {
 	system("cls");
 	printf("|================+++============|\n");
-	printf("|		  File Transfer			|\n");
+	printf("|         File Transfer         |\n");
 	printf("|_____________[Menu]____________|\n");
 	printf("|                               |\n");
-	printf("|		1. Login				|\n");
-	printf("|		2. Exit					|\n");
-	printf("|								|\n");
+	printf("|       1. Login                |\n");
+	printf("|       2. Exit                 |\n");
+	printf("|                               |\n");
 	printf("|===============================|\n");
 
 	char choice = '.';
@@ -115,8 +118,7 @@ void showMenuNotLoggedIn() {
 		choice = _getch();
 		switch (choice) {
 		case '1':
-			handleLogIn();
-			break;
+			return handleLogIn();
 		case '2':
 			quit = true;
 			return;
@@ -130,11 +132,11 @@ void showMenuNotLoggedIn() {
 void showMenuLoggedIn() {
 	system("cls");
 	printf("|================+++============|\n");
-	printf("|		  File Transfer			|\n");
+	printf("|         File Transfer         |\n");
 	printf("|_____________[Menu]____________|\n");
-	printf("|								|\n");
-	printf("|      1. Visit group			|\n");
-	printf("|	   2. Create new group		|\n");
+	printf("|                               |\n");
+	printf("|      1. Visit group           |\n");
+	printf("|      2. Create new group      |\n");
 	printf("|	   3. Join group			|\n");
 	printf("|	   4. Log out				|\n");
 	printf("|	   5. Exit					|\n");
@@ -146,14 +148,13 @@ void showMenuLoggedIn() {
 		choice = _getch();
 		switch (choice) {
 		case '1':
-			handleVisitGroup();
-			break;
+			return handleVisitGroup();
 		case '2':
-			handleCreateGroup();
+			return handleCreateGroup();
 		case '3':
-			handleJoinGroup();
+			return handleJoinGroup();
 		case '4':
-			handleLogOut();
+			return handleLogOut();
 		case '5':
 			quit = true;
 			return;
@@ -174,11 +175,46 @@ void showGroupMenu() {
 	printf("|	   2. Create new folder		|\n");
 	printf("|	   3. Upload file			|\n");
 	printf("|	   4. Download file			|\n");
-	printf("|	   5. Leave group			|\n");
-	printf("|	   6. Back					|\n");
-	printf("|      7. Exit					|\n");
+	printf("|	   5. Delete file			|\n");
+	printf("|	   6. Leave group			|\n");
+	printf("|	   7. Back					|\n");
+	printf("|      8. Exit					|\n");
 	printf("|								|\n");
 	printf("|===============================|\n");
+
+	printf("\nFiles in this folder\n");
+
+	int dirCount = 0, fileCount = 0;
+	vector<char*> fileList, dirList;
+
+	int ret = processOpFileList(fileList, dirList);
+	if (ret == 1) {
+		printf("\nError sending to server.\n");
+		Sleep(2000);
+		return;
+	}
+
+	printf("\033[0;36m");
+	for (char* file : fileList) {
+		printf("%d. %s\n", ++fileCount, file);
+	}
+	printf("\033[0m");
+
+	if (fileCount == 0) {
+		printf("\nThis folder doesn't have any files!\n");
+		return;
+	}
+
+	printf("\033[0;33m");
+	for (char* dir : dirList) {
+		printf("%d. %s\n", ++dirCount, dir);
+	}
+	printf("\033[0m");
+
+	if (dirCount == 0) {
+		printf("\nThis folder doesn't have any subfolders!\n");
+		return;
+	}
 
 	char choice = '.';
 	do {
@@ -197,10 +233,14 @@ void showGroupMenu() {
 			handleDownload();
 			break;
 		case '5':
-			handleLeaveGroup();
+			// Delete();
+			break;
 		case '6':
-			//handleBack();
+			handleLeaveGroup();
+			break;
 		case '7':
+			return;
+		case '8':
 			quit = true;
 			return;
 		default:
@@ -229,24 +269,29 @@ void handleVisitGroup() {
 	}
 
 	for (char* group : groupList) {
-		printf("%d. %s", ++groupCount, group);
+		printf("%d. %s\n", ++groupCount, group);
 	}
+
+	if (groupCount == 0) {
+		printf("\nYou are not in any group. Try joining one!\n");
+		return;
+	} 
 
 	int selection;
 	bool valid;
 	do {
 		valid = true;
-		printf("Choose group: ");
+		printf("\nChoose group: ");
 		scanf("%d", &selection);
 		
-		if (selection > groupCount || selection < 0) {
+		if (selection > groupCount || selection <= 0) {
 			valid = false;
 		}
 
 	} while (!valid);
 	printf("\n\n");
 
-	ret = processOpGroup(OPG_GROUP_USE, groupList[selection]);
+	ret = processOpGroup(OPG_GROUP_USE, groupList[selection - 1]);
 	if (ret == 1) {
 		printf("\nError sending to server.\n");
 		for (char* group : groupList) {
@@ -257,13 +302,14 @@ void handleVisitGroup() {
 		return;
 	}
 
-	currentGroup = groupList[selection];
+	currentGroup = groupList[selection - 1];
 	for (char* group : groupList) {
 		if (group != currentGroup) free(group);
 	}
 
 	showStatusMsg(ret, "Enter group");
-	Sleep(2000);
+
+	showGroupMenu();
 }
 
 void handleCreateGroup() {
@@ -276,7 +322,12 @@ void handleCreateGroup() {
 		printf("Group name should be %d characters or less.\n", GROUPNAME_SIZE);
 		printf("Don't input over %d characters, else it will be truncated.\n\n", GROUPNAME_SIZE);
 		printf("New group name: ");
+		fflush(stdin);
 		gets_s(newGroupName, GROUPNAME_SIZE);
+
+		if (strlen(newGroupName) == 0) {
+			valid = false;
+		}
 	} while (!valid);
 	printf("\n\n");
 
@@ -301,6 +352,10 @@ void handleJoinGroup() {
 		printf("Don't input over %d characters, else it will be truncated.\n\n", GROUPNAME_SIZE);
 		printf("Enter group name to join: ");
 		gets_s(groupName, GROUPNAME_SIZE);
+
+		if (strlen(groupName) == 0) {
+			valid = false;
+		}
 	} while (!valid);
 	printf("\n\n");
 
@@ -352,6 +407,10 @@ void handleNavigate() {
 		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
 		printf("Where to? ");
 		gets_s(path, MAX_PATH);
+
+		if (strlen(path) == 0) {
+			valid = false;
+		}
 	} while (!valid);
 	printf("\n\n");
 
@@ -377,6 +436,10 @@ void handleNewFolder() {
 		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
 		printf("New folder name: ");
 		gets_s(newFolderName, MAX_PATH);
+
+		if (strlen(newFolderName) == 0) {
+			valid = false;
+		}
 	} while (!valid);
 	printf("\n\n");
 
@@ -392,7 +455,7 @@ void handleNewFolder() {
 }
 
 void handleUpload() {
-	char fileName[MAX_PATH];
+	// char fileName[MAX_PATH];
 	printf("\n");
 
 	bool valid;
@@ -400,18 +463,24 @@ void handleUpload() {
 		valid = true;
 		printf("File name should be %d characters or less.\n", MAX_PATH);
 		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
-		printf("Where to? ");
-		gets_s(fileName, GROUPNAME_SIZE);
+		printf("Enter file path on your computer: ");
+		// gets_s(fileName, GROUPNAME_SIZE);
+		/*
+		if (strlen(fileName) == 0) {
+			valid = false;
+		}
+		*/
+
 	} while (!valid);
 	printf("\n\n");
 
-	uploadFileToServer(fileName);
+	uploadFileToServer(NULL);
 
-	Sleep(2000);
+	return;
 }
 
 void handleDownload() {
-	char path[MAX_PATH];
+	// char path[MAX_PATH];
 	printf("\n");
 
 	bool valid;
@@ -419,12 +488,18 @@ void handleDownload() {
 		valid = true;
 		printf("Path should be %d characters or less.\n", MAX_PATH);
 		printf("Don't input over %d characters, else it will be truncated.\n\n", MAX_PATH);
-		printf("Where to? ");
-		gets_s(path, GROUPNAME_SIZE);
+		printf("Which file? ");
+		// gets_s(path, GROUPNAME_SIZE);
+		/*
+		if (strlen(path) == 0) {
+			valid = false;
+		}
+		*/
+
 	} while (!valid);
 	printf("\n\n");
 
-	downloadFileFromServer(path);
+	downloadFileFromServer(NULL);
 
 	Sleep(2000);
 }
@@ -481,6 +556,13 @@ void handleLogIn() {
 	printf("\n\n");
 
 	int ret = processOpLogIn(username, password);
+	if (ret == 1) {
+		printf("\nClient will quit.\n");
+		quit = true;
+		Sleep(2000);
+		return;
+	}
+	ret = processOpReqCookie();
 	if (ret == 1) {
 		printf("\nClient will quit.\n");
 		quit = true;

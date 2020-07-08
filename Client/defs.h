@@ -14,9 +14,9 @@
 #define OPG_GROUP_LIST		201
 #define OPG_GROUP_JOIN		202
 #define OPG_GROUP_LEAVE		203
-#define OPG_GROUP_NEW		210
-#define OPG_GROUP_COUNT		220
-#define OPG_GROUP_NAME		221
+#define OPG_GROUP_NEW		204
+#define OPG_GROUP_COUNT		210
+#define OPG_GROUP_NAME		211
 
 #define OPB_LIST			300
 #define OPB_FILE_CD			301

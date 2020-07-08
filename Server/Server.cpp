@@ -684,43 +684,71 @@ void ProcessDownloadingOperations()
 			rcvMess = readobj->sock->mess;
 			if (rcvMess.opcode == OPT_FILE_DOWN)
 			{
-				strcpy_s(readobj->sock->fileTransfer.fileName, "D://server/");
-				strcat_s(readobj->sock->fileTransfer.fileName, rcvMess.payload);
-				fprintf(stderr, "%s\n", readobj->sock->fileTransfer.fileName);
-				if (isFileExists(readobj->sock->fileTransfer.fileName)) {
-					FILE *file;
-					//Open file
-					file = fopen(readobj->sock->fileTransfer.fileName, "rb");
-					if (!file)
-					{
-						fprintf(stderr, "Unable to open file %s", readobj->sock->fileTransfer.fileName);
-						return;
+				printf("%s\n", rcvMess.payload);
+				Account* account = NULL;
+				char cookie[COOKIE_LEN];
+				rcvMess.payload[COOKIE_LEN - 1] = 0;
+				strcpy_s(cookie, COOKIE_LEN, rcvMess.payload);
+
+				// Find account with cookie
+				for (auto it = accountList.begin(); it != accountList.end(); it++) {
+					if (strcmp(it->cookie, cookie) == 0) {
+						account = (Account*)&(*it);
+						break;
 					}
-					//Get file length
-					fseek(file, 0, SEEK_END);
-					readobj->sock->fileTransfer.fileLen = ftell(file);
-					fseek(file, 0, SEEK_SET);
-					readobj->sock->fileTransfer.nLeft = readobj->sock->fileTransfer.fileLen;
-					readobj->sock->fileTransfer.idx = 0;
-					readobj->sock->fileTransfer.fileBuffer = (char*)malloc(readobj->sock->fileTransfer.fileLen + 1);
-					if (!readobj->sock->fileTransfer.fileBuffer)
-					{
-						fprintf(stderr, "Memory error!");
-						fclose(file);
-						return;
-					}
-					fread(readobj->sock->fileTransfer.fileBuffer, readobj->sock->fileTransfer.fileLen, 1, file);
-					fclose(file);//***************************
-					MD5 md5;
-					sendMessage.opcode = OPT_FILE_DIGEST;
-					strcpy_s(sendMessage.payload, md5.digestFile(readobj->sock->fileTransfer.fileName));
-					sendMessage.length = strlen(md5.digestFile(readobj->sock->fileTransfer.fileName));
+				}
+
+				if (account == NULL) {
+					sendMessage.opcode = OPS_ERR_NOTFOUND;
+					sendMessage.length = 0;
 				}
 				else
 				{
-					sendMessage.opcode = OPS_ERR_NOTFOUND;
-					strcpy_s(sendMessage.payload, readobj->sock->fileTransfer.fileName);
-					sendMessage.length = strlen(readobj->sock->fileTransfer.fileName);
+					if (strlen(account->workingDir) > 0) {
+						snprintf(readobj->sock->fileTransfer.fileName, FILENAME_SIZE, "%s/%s/%s/%s",
+							STORAGE_LOCATION, account->workingGroup->pathName, account->workingDir, rcvMess.payload + COOKIE_LEN);
+					}
+					else {
+						snprintf(readobj->sock->fileTransfer.fileName, FILENAME_SIZE, "%s/%s/%s",
+							STORAGE_LOCATION, account->workingGroup->pathName, rcvMess.payload + COOKIE_LEN);
+					}
+
+					fprintf(stderr, "%s\n", readobj->sock->fileTransfer.fileName);
+					if (isFileExists(readobj->sock->fileTransfer.fileName)) {
+						FILE *file;
+						//Open file
+						file = fopen(readobj->sock->fileTransfer.fileName, "rb");
+						if (!file)
+						{
+							fprintf(stderr, "Unable to open file %s", readobj->sock->fileTransfer.fileName);
+							return;
+						}
+						//Get file length
+						fseek(file, 0, SEEK_END);
+						readobj->sock->fileTransfer.fileLen = ftell(file);
+						fseek(file, 0, SEEK_SET);
+						readobj->sock->fileTransfer.nLeft = readobj->sock->fileTransfer.fileLen;
+						readobj->sock->fileTransfer.idx = 0;
+						readobj->sock->fileTransfer.fileBuffer = (char*)malloc(readobj->sock->fileTransfer.fileLen + 1);
+						if (!readobj->sock->fileTransfer.fileBuffer)
+						{
+							fprintf(stderr, "Memory error!");
+							fclose(file);
+							return;
+						}
+						fread(readobj->sock->fileTransfer.fileBuffer, readobj->sock->fileTransfer.fileLen, 1, file);
+						fclose(file);//***************************
+						MD5 md5;
+						sendMessage.opcode = OPT_FILE_DIGEST;
+						strcpy_s(sendMessage.payload, md5.digestFile(readobj->sock->fileTransfer.fileName));
+						sendMessage.length = strlen(md5.digestFile(readobj->sock->fileTransfer.fileName));
+					}
+					else
+					{
+						sendMessage.opcode = OPS_ERR_NOTFOUND;
+						strcpy_s(sendMessage.payload, readobj->sock->fileTransfer.fileName);
+						sendMessage.length = strlen(readobj->sock->fileTransfer.fileName);
+					}
 				}
 				memcpy(readobj->buf, &sendMessage, sizeof(MESSAGE));
 				sendobj = readobj;
@@ -796,35 +824,63 @@ void ProcessUploadingOperations() {
 			rcvMess = writeobj->sock->mess;
 			if (rcvMess.opcode == OPT_FILE_UP)
 			{
-				strcpy_s(writeobj->sock->fileTransfer.fileName, "D://server/");
-				strcat_s(writeobj->sock->fileTransfer.fileName, rcvMess.payload);
-				fprintf(stderr, "%s\n", writeobj->sock->fileTransfer.fileName);
+				Account* account = NULL;
+				char cookie[COOKIE_LEN];
+				rcvMess.payload[COOKIE_LEN - 1] = 0;
+				strcpy_s(cookie, COOKIE_LEN, rcvMess.payload);
 
-				if (!isFileExists(writeobj->sock->fileTransfer.fileName))
-				{
-					writeobj->sock->fileTransfer.file = fopen(writeobj->sock->fileTransfer.fileName, "wb");
-					if (!writeobj->sock->fileTransfer.file)
-					{
-						fprintf(stderr, "Unable to open file ");
-						return;
+				// Find account with cookie
+				for (auto it = accountList.begin(); it != accountList.end(); it++) {
+					if (strcmp(it->cookie, cookie) == 0) {
+						account = (Account*)&(*it);
+						break;
 					}
-					sendMessage.opcode = OPS_OK;
-					strcpy_s(sendMessage.payload, writeobj->sock->fileTransfer.fileName);
-					sendMessage.length = strlen(writeobj->sock->fileTransfer.fileName);
+				}
+
+				if (account == NULL) {
+					sendMessage.opcode = OPS_ERR_NOTFOUND;
+					sendMessage.length = 0;
 				}
 				else
 				{
-					sendMessage.opcode = OPS_ERR_ALREADYEXISTS;
-					strcpy_s(sendMessage.payload, writeobj->sock->fileTransfer.fileName);
-					sendMessage.length = strlen(writeobj->sock->fileTransfer.fileName);
+					if (strlen(account->workingDir) > 0) {
+					snprintf(writeobj->sock->fileTransfer.fileName, FILENAME_SIZE, "%s/%s/%s/%s",
+						STORAGE_LOCATION, account->workingGroup->pathName, account->workingDir, rcvMess.payload + COOKIE_LEN);
+					}
+					else {
+						snprintf(writeobj->sock->fileTransfer.fileName, FILENAME_SIZE, "%s/%s/%s",
+							STORAGE_LOCATION, account->workingGroup->pathName, rcvMess.payload + COOKIE_LEN);
+					}
+
+					// strcat_s(writeobj->sock->fileTransfer.fileName, rcvMess.payload);
+					fprintf(stderr, "%s\n", writeobj->sock->fileTransfer.fileName);
+
+					if (!isFileExists(writeobj->sock->fileTransfer.fileName))
+					{
+						writeobj->sock->fileTransfer.file = fopen(writeobj->sock->fileTransfer.fileName, "wb");
+						if (!writeobj->sock->fileTransfer.file)
+						{
+							fprintf(stderr, "Unable to open file ");
+							return;
+						}
+						sendMessage.opcode = OPS_OK;
+						strcpy_s(sendMessage.payload, writeobj->sock->fileTransfer.fileName);
+						sendMessage.length = strlen(writeobj->sock->fileTransfer.fileName);
+					}
+					else
+					{
+						sendMessage.opcode = OPS_ERR_ALREADYEXISTS;
+						strcpy_s(sendMessage.payload, writeobj->sock->fileTransfer.fileName);
+						sendMessage.length = strlen(writeobj->sock->fileTransfer.fileName);
+					}
+
 				}
-
-
 				memcpy(writeobj->buf, &sendMessage, sizeof(MESSAGE));
 				sendobj = writeobj;
 				sendobj->buflen = sizeof(MESSAGE);
 				sendobj->sock = writeobj->sock;
 				EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, sendobj, OP_WRITE);
+				
 			}
 			else if (rcvMess.opcode == OPS_OK)
 			{
@@ -1429,8 +1485,14 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 				recvobj->sock = clientobj;
 				recvobj->sock->mess = *rcvMess;
 
+
+
 				if (parseAndProcess(recvobj)) {
-					EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, recvobj, OP_WRITE);
+					memcpy(buf->buf, &recvobj->sock->mess, sizeof(MESSAGE));
+					sendobj = buf;
+					sendobj->sock = clientobj;
+					
+					EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, sendobj, OP_WRITE);
 					ProcessPendingOperations();
 				}
 			}
@@ -1519,11 +1581,18 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 				}
 				else {
 					recvobj = buf;
-					recvobj->sock = clientobj;
+					recvobj->sock = sockobj;
 					recvobj->sock->mess = *rcvMess;
 
 					if (parseAndProcess(recvobj)) {
-						EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, recvobj, OP_WRITE);
+						memcpy(buf->buf, &recvobj->sock->mess, sizeof(MESSAGE));
+						sendobj = buf;
+						sendobj->sock = sockobj;
+
+						MESSAGE m = (MESSAGE) sendobj->sock->mess;
+						
+						EnqueuePendingOperation(&gPendingSendList, &gPendingSendListEnd, sendobj, OP_WRITE);
+						printf("\nSending code %d to client %d", m.opcode, sockobj->s);
 						ProcessPendingOperations();
 					}
 
