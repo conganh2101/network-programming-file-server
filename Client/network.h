@@ -46,13 +46,13 @@ void downloadFileFromServer(char *filePath);
 
 extern char cookie[COOKIE_LEN];
 
-LPSOCKET_INFORMATION downloadSockets[MAX_SOCK];
-LPFILE_INFORMATION downloadFiles[MAX_SOCK];
+LPSOCKET_INFORMATION downloadSockets[MAX_SOCK];// data structure to save socket information to serve download
+LPFILE_INFORMATION downloadFiles[MAX_SOCK];// data structure to save file information to serve download
 int nDownloadSockets = 0;
 CRITICAL_SECTION downloadCriticalSection;
 
-LPSOCKET_INFORMATION uploadSockets[MAX_SOCK];
-LPFILE_INFORMATION uploadFiles[MAX_SOCK];
+LPSOCKET_INFORMATION uploadSockets[MAX_SOCK];// data structure to save socket information to serve upload
+LPFILE_INFORMATION uploadFiles[MAX_SOCK];// data structure to save file information to serve upload
 int nUploadSockets = 0;
 CRITICAL_SECTION uploadCriticalSection;
 
@@ -77,6 +77,8 @@ int opcode;
 
 char name[100];
 
+//Function:initializeNetwork
+//Description: Init variable end set up thread, event needed for data IO
 int initializeNetwork(int argc, char** argv)
 {
 
@@ -158,7 +160,9 @@ int initializeNetwork(int argc, char** argv)
 	return 0;
 }
 
-
+//Function:handleSent
+//Description: This function set WSAEVENT connHandleSent to signal
+//             workerSentThread to begin send data to server
 void handleSent()
 {
 
@@ -175,7 +179,9 @@ void handleSent()
 	}
 
 }
-
+//Function:handleRecv
+//Description: This function set WSAEVENT connHandleRecv to signal
+//             workerRecvThread to begin reicev data to server
 void handleRecv()
 {
 
@@ -194,8 +200,10 @@ void handleRecv()
 	return;
 }
 
-
-
+//Function:workerRecvThread
+//Description: This thread take void parameter is WSAEVENT connHandleRecv
+//             when this event is set , this thread read message from gSentMessage 
+//             then begin sent to server
 unsigned __stdcall workerRecvThread(LPVOID lpParameter)
 {
 	DWORD flags;
@@ -253,7 +261,9 @@ unsigned __stdcall workerRecvThread(LPVOID lpParameter)
 	return 0;
 }
 
-
+//Function:workerRecvRoutine
+//Description: workerRecvThread thread call this function to recursively call this Callback function
+//             to continue reiceve from server if needed
 void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
 	// DWORD sendBytes, recvBytes;
@@ -326,7 +336,10 @@ void CALLBACK workerRecvRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLA
 		}
 	}
 }
-
+//Function:workerSentThread
+//Description: This thread take void parameter is WSAEVENT connHandleSent
+//             When this event is set , this thread 
+//             begin reiceve from server then store the result at gRecvMess
 unsigned __stdcall workerSentThread(LPVOID lpParameter)
 {
 	DWORD flags;
@@ -384,7 +397,9 @@ unsigned __stdcall workerSentThread(LPVOID lpParameter)
 	return 0;
 }
 
-
+//Function:workerSentRoutine
+//Description: workerSentThread thread call this function to recursively call this Callback function
+//             to continue send from server if needed
 void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
 	DWORD sendBytes;
@@ -459,7 +474,10 @@ void CALLBACK workerSentRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLA
 	}
 }
 
-
+//Function:downloadFileFromServer
+//Description: This function create new socket to server to serv the download protoccol
+//             Then set WSAEVENT connDownloadEvent to signal
+//             workerDownloadThread to begin send data to server
 void downloadFileFromServer(char *filepath) {
 
 	strcpy_s(name, "screenshot.png");
@@ -486,6 +504,10 @@ void downloadFileFromServer(char *filepath) {
 	}
 }
 
+//Function:uploadFileFromServer
+//Description: This function create new socket to server to serve the upload protoccol
+//             Then set WSAEVENT connUploadEvent to signal
+//             workerUploadThread to begin send data to server
 void uploadFileToServer(char *filepath) {
 	// strcpy_s(name,  filepath);
 
@@ -522,8 +544,10 @@ void uploadFileToServer(char *filepath) {
 		exit(1);
 	}
 }
-
-
+//Function:workerUploadThread
+//Description: This thread take void parameter is WSAEVENT connUploadEvent
+//             When this event is set , this thread 
+//             begin upload file to server after uploading protocol
 unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 {
 	DWORD flags;
@@ -582,7 +606,7 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		uploadFiles[nUploadSockets]->idx = 0;
 		MESSAGE sendMessage;
 		sendMessage.opcode = OPT_FILE_UP;
-
+                // save data of file to filebuffer
 		uploadFiles[nUploadSockets]->fileBuffer = (char*)malloc(uploadFiles[nUploadSockets]->fileLen + 1);
 		if (!uploadFiles[nUploadSockets]->fileBuffer)
 		{
@@ -592,6 +616,7 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		}
 
 		fread(uploadFiles[nUploadSockets]->fileBuffer, uploadFiles[nUploadSockets]->fileLen, 1, file);
+		// Craft the first message send to server, payload contain cookie and file name.
 		snprintf(sendMessage.payload, BUFF_SIZE, "%s %s", cookie, uploadFiles[nUploadSockets]->fileName);
 		// strcpy_s(sendMessage.payload, uploadFiles[nUploadSockets]->fileName);
 		sendMessage.length = strlen(sendMessage.payload);
@@ -599,7 +624,7 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 
 		fclose(file);
 
-		// gui message moi vs payload la ten file
+		//First: send message with payload contain cookie and file name
 
 		uploadSockets[nUploadSockets]->sockfd = client;
 
@@ -610,9 +635,6 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 		uploadSockets[nUploadSockets]->dataBuff.buf = uploadSockets[nUploadSockets]->buff;
 		uploadSockets[nUploadSockets]->operation = SEND;
 		flags = 0;
-
-		//First: send message contain file name to server
-
 		if (WSASend(uploadSockets[nUploadSockets]->sockfd, &(uploadSockets[nUploadSockets]->dataBuff), 1,
 			&sendBytes, 0, &(uploadSockets[nUploadSockets]->overlapped), workerUploadRoutine) == SOCKET_ERROR) {
 			if (WSAGetLastError() != WSA_IO_PENDING) {
@@ -627,7 +649,9 @@ unsigned __stdcall workerUploadThread(LPVOID lpParameter)
 
 	return 0;
 }
-
+//Function:workerUploadRoutine
+//Description: workerUploadThread thread call this function to recursively call this Callback function
+//             to continue upload file data to server if needed after upload file protocol
 void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
 	DWORD sendBytes, recvBytes;
@@ -709,7 +733,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 			MESSAGE  *recvMessage;
 			recvMessage = (MESSAGE *)sockInfo->dataBuff.buf;
 			if (recvMessage->opcode == OPS_OK)
-			{   // receive message that server allow to begin upload file
+			{       // receive message that server allow to begin upload file
 				// because file is not existing on server
 				MESSAGE sendMessage;
 				sendMessage.opcode = OPT_FILE_DIGEST;
@@ -740,7 +764,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 				}
 			}
 			else if (recvMessage->opcode == OPS_SUCCESS)
-			{   // message from server to annouce that
+			{      // message from server to annouce that
 				// file has been upload successfully
 				EnterCriticalSection(&uploadCriticalSection);
 
@@ -849,7 +873,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 			MESSAGE  *sendMessage;
 			sendMessage = (MESSAGE *)sockInfo->dataBuff.buf;
 			if (sendMessage->length == 0)
-			{   // if sent message has length=0
+			{      // if sent message has length=0
 				// post WSARecv to receive result from server
 				ZeroMemory(&(sockInfo->overlapped), sizeof(WSAOVERLAPPED));
 				sockInfo->recvBytes = 0;
@@ -942,7 +966,7 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 						uploadFiles[index]->idx += sendMessage.length;
 					}
 					else if (uploadFiles[index]->nLeft == 0)
-					{   // if sent all data in file 
+					{       // if sent all data in file 
 						// post WSASent to send the message with length=0
 						// to annouce that this is the last message
 						MESSAGE sendMessage;
@@ -1017,6 +1041,10 @@ void CALLBACK workerUploadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVER
 	}
 }
 
+//Function:workerDownloadThread
+//Description: This thread take void parameter is WSAEVENT connDownloadEvent
+//             When this event is set , this thread 
+//             begin download file from server after downloading protocol
 unsigned __stdcall workerDownloadThread(LPVOID lpParameter)
 {
 	DWORD flags;
@@ -1099,7 +1127,9 @@ unsigned __stdcall workerDownloadThread(LPVOID lpParameter)
 
 	return 0;
 }
-
+//Function:workerDownloadRoutine
+//Description: workerDownloadThread thread call this function to recursively call this Callback function
+//             to continue download file data from server if needed after download file protocol
 void CALLBACK workerDownloadRoutine(DWORD error, DWORD transferredBytes, LPWSAOVERLAPPED overlapped, DWORD inFlags)
 {
 	DWORD sendBytes, recvBytes;
