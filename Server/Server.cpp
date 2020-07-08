@@ -530,7 +530,11 @@ void EnqueuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *ob
 
 	return;
 }
-
+// Function: EnqueueDownloadingOperation
+// Description: Enqueues a buffer object into a list (at the end).
+// IN -BUFFER_OBJ **head: pointer to the address of head of Downloading buffer queue.
+//    -BUFFER_OBJ **end: pointer to the address of end of Downloading buffer queue.
+//    -BUFFER_OBJ *obj: pointer to buffer object to Downloading buffer queue.
 void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
@@ -551,7 +555,11 @@ void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ
 
 	return;
 }
-
+// Function: EnqueueUploadingOperation
+// Description: Enqueues a buffer object into a list (at the end).
+// IN -BUFFER_OBJ **head: pointer to the address of head of Uploading buffer queue.
+//    -BUFFER_OBJ **end: pointer to the address of end of Uploading buffer queue.
+//    -BUFFER_OBJ *obj: pointer to buffer object to Uploading buffer queue 
 void EnqueueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
@@ -598,7 +606,11 @@ BUFFER_OBJ *DequeuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, int op)
 	LeaveCriticalSection(&gPendingCritSec);
 	return obj;
 }
-
+// Function: DequeueDownloadingOperation
+// Description: Dequeues the first entry in the list.
+// IN:  -BUFFER_OBJ **head:pointer to the address of head of Downloading buffer queue.
+//      -BUFFER_OBJ **end :pointer to the address of end of Downloading buffer queue.
+// OUT: -BUFFER_OBJ *     : poninter to the buffer object
 BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
@@ -618,7 +630,11 @@ BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 	LeaveCriticalSection(&gReadingCritSec);
 	return obj;
 }
-
+// Function: DequeueUploadingOperation
+// Description: Dequeues the first entry in the list.
+// IN: -BUFFER_OBJ **head:pointer to address of the head of Uploading buffer queue.
+//    -BUFFER_OBJ **end :pointer toaddress of  the end of Uploading buffer queue.
+// OUT: -BUFFER_OBJ *     : poninter to the buffer object
 BUFFER_OBJ *DequeueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
@@ -668,7 +684,11 @@ void ProcessPendingOperations()
 	}
 	return;
 }
-
+// Function: ProcessDownloadingOperations
+// Description:
+//    This function goes through the list of pending Downloading operations 
+//    and process them end then postRecv or enqueuePendingOperations if needed
+//    as long as the maximum number of outstanding downloads is not exceeded.
 void ProcessDownloadingOperations()
 {
 	BUFFER_OBJ *readobj = NULL;
@@ -807,7 +827,11 @@ void ProcessDownloadingOperations()
 	}
 	return;
 }
-
+// Function: ProcessUploadingOperations
+// Description:
+//    This function goes through the list of pending Uploading operations 
+//    and process them end then postRecv or enqueuePendingOperations if needed
+//    as long as the maximum number of outstanding uploads is not exceeded.
 void ProcessUploadingOperations() {
 	BUFFER_OBJ *writeobj = NULL;
 	BUFFER_OBJ *rcvobj = NULL;
@@ -1761,7 +1785,11 @@ DWORD WINAPI CompletionThread(LPVOID lpParam)
 	ExitThread(0);
 	return 0;
 }
-
+// Function: workerReadThread
+// Description:
+//    This is the  thread which services our Download file protocol . One of
+//    these threads is created  on the system. The thread sits in
+//    an infinite loop calling ProcessDownloadingOperations to process file operation needed .
 unsigned __stdcall workerReadThread(void *param)
 {
 	while (TRUE)
@@ -1769,7 +1797,11 @@ unsigned __stdcall workerReadThread(void *param)
 		ProcessDownloadingOperations();
 	}
 }
-
+// Function: workerWriteThread
+// Description:
+//    This is the  thread which services our Upload file protocol . One of
+//    these threads is created  on the system. The thread sits in
+//    an infinite loop calling ProcessUploadingOperations to process file operation needed .
 unsigned __stdcall workerWriteThread(void *param)
 {
 	while (TRUE)
