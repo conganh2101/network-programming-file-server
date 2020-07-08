@@ -530,7 +530,11 @@ void EnqueuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *ob
 
 	return;
 }
-
+// Function: EnqueueDownloadingOperation
+// Description: Enqueues a buffer object into a list (at the end).
+// IN -BUFFER_OBJ **head: pointer to the address of head of Downloading buffer queue.
+//    -BUFFER_OBJ **end: pointer to the address of end of Downloading buffer queue.
+//    -BUFFER_OBJ *obj: pointer to buffer object to Downloading buffer queue.
 void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
@@ -551,7 +555,11 @@ void EnqueueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ
 
 	return;
 }
-
+// Function: EnqueueUploadingOperation
+// Description: Enqueues a buffer object into a list (at the end).
+// IN -BUFFER_OBJ **head: pointer to the address of head of Uploading buffer queue.
+//    -BUFFER_OBJ **end: pointer to the address of end of Uploading buffer queue.
+//    -BUFFER_OBJ *obj: pointer to buffer object to Uploading buffer queue
 void EnqueueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, BUFFER_OBJ *obj)
 {
 
@@ -598,7 +606,11 @@ BUFFER_OBJ *DequeuePendingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end, int op)
 	LeaveCriticalSection(&gPendingCritSec);
 	return obj;
 }
-
+// Function: DequeueDownloadingOperation
+// Description: Dequeues the first entry in the list.
+// IN:  -BUFFER_OBJ **head:pointer to the address of head of Downloading buffer queue.
+//      -BUFFER_OBJ **end :pointer to the address of end of Downloading buffer queue.
+// OUT: -BUFFER_OBJ *     : poninter to the buffer object
 BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
@@ -618,7 +630,11 @@ BUFFER_OBJ *DequeueDownloadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 	LeaveCriticalSection(&gReadingCritSec);
 	return obj;
 }
-
+// Function: DequeueUploadingOperation
+// Description: Dequeues the first entry in the list.
+// IN:  -BUFFER_OBJ **head:pointer to address of the head of Uploading buffer queue.
+//      -BUFFER_OBJ **end :pointer toaddress of  the end of Uploading buffer queue.
+// OUT: -BUFFER_OBJ *     : poninter to the buffer object
 BUFFER_OBJ *DequeueUploadingOperation(BUFFER_OBJ **head, BUFFER_OBJ **end)
 {
 	BUFFER_OBJ *obj = NULL;
@@ -668,7 +684,11 @@ void ProcessPendingOperations()
 	}
 	return;
 }
-
+// Function: ProcessDownloadingOperations
+// Description:
+//    This function goes through the list of pending Downloading operations 
+//    and process them end then postRecv or enqueuePendingOperations if needed
+//    as long as the maximum number of outstanding downloads is not exceeded.
 void ProcessDownloadingOperations()
 {
 	BUFFER_OBJ *readobj = NULL;
@@ -684,6 +704,8 @@ void ProcessDownloadingOperations()
 			rcvMess = readobj->sock->mess;
 			if (rcvMess.opcode == OPT_FILE_DOWN)
 			{
+				//First : when server accept new socket to serv download protocol
+				//then server extract cookie and file name from payload
 				printf("%s\n", rcvMess.payload);
 				Account* account = NULL;
 				char cookie[COOKIE_LEN];
@@ -759,8 +781,8 @@ void ProcessDownloadingOperations()
 			}
 			else if (rcvMess.opcode == OPT_FILE_DATA || rcvMess.opcode == OPS_OK)
 			{
-
-
+				//Thirst:After recv message from client to notify that client ready to download
+				//then server continously send file data to client
 				sendMessage.opcode = OPT_FILE_DATA;
 				if (readobj->sock->fileTransfer.nLeft > BUFF_SIZE)
 				{
@@ -792,6 +814,7 @@ void ProcessDownloadingOperations()
 			}
 			else if (rcvMess.opcode == OPT_FILE_DIGEST)
 			{
+				//Second: After sending to client digest's file
 				recvobj = readobj;
 				recvobj->sock = readobj->sock;
 				PostRecv(readobj->sock, recvobj);
@@ -807,7 +830,11 @@ void ProcessDownloadingOperations()
 	}
 	return;
 }
-
+// Function: ProcessUploadingOperations
+// Description:
+//    This function goes through the list of pending Uploading operations 
+//    and process them end then postRecv or enqueuePendingOperations if needed
+//    as long as the maximum number of outstanding uploads is not exceeded.
 void ProcessUploadingOperations() {
 	BUFFER_OBJ *writeobj = NULL;
 	BUFFER_OBJ *rcvobj = NULL;
@@ -824,6 +851,8 @@ void ProcessUploadingOperations() {
 			rcvMess = writeobj->sock->mess;
 			if (rcvMess.opcode == OPT_FILE_UP)
 			{
+				//First : when server accept new socket to serv upload protocol
+				//then server extract cookie and file name from payload
 				Account* account = NULL;
 				char cookie[COOKIE_LEN];
 				rcvMess.payload[COOKIE_LEN - 1] = 0;
@@ -843,6 +872,7 @@ void ProcessUploadingOperations() {
 				}
 				else
 				{
+					// get file path for processing uploading operator
 					if (strlen(account->workingDir) > 0) {
 					snprintf(writeobj->sock->fileTransfer.fileName, FILENAME_SIZE, "%s/%s/%s/%s",
 						STORAGE_LOCATION, account->workingGroup->pathName, account->workingDir, rcvMess.payload + COOKIE_LEN);
@@ -884,12 +914,15 @@ void ProcessUploadingOperations() {
 			}
 			else if (rcvMess.opcode == OPS_OK)
 			{
+				// Second : Server r
 				rcvobj = writeobj;
 				rcvobj->sock = writeobj->sock;
 				PostRecv(writeobj->sock, rcvobj);
 			}
 			else if (rcvMess.opcode == OPT_FILE_DATA)
 			{
+				//Thirst: Server continously recv data from client until it hits 
+				//message with lenght=0
 				if (rcvMess.length == 0)
 				{
 					fclose(writeobj->sock->fileTransfer.file);
@@ -948,7 +981,8 @@ void ProcessUploadingOperations() {
 			}
 			else if (rcvMess.opcode = OPT_FILE_DIGEST)
 			{
-
+				//Second : Server recv file's digest from client and save it to
+				// buffer object
 				strcpy_s(writeobj->sock->fileTransfer.digest, rcvMess.payload);
 				fprintf(stderr, "\n%s\n", writeobj->sock->fileTransfer.digest);
 				rcvobj = writeobj;
@@ -1418,7 +1452,7 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 	}
 
 	if (buf->operation == OP_ACCEPT)
-	{
+	{//handle IO operation and MESSAGE after server accept new socket
 		HANDLE            hrc;
 		SOCKADDR_STORAGE *LocalSockaddr = NULL, *RemoteSockaddr = NULL;
 		int               LocalSockaddrLen, RemoteSockaddrLen;
@@ -1459,7 +1493,7 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 			//MESSAGE sendMessage;
 			rcvMess = (MESSAGE *)buf->buf;
 			fprintf(stderr, "begin\n");
-
+                       
 			if (rcvMess->opcode == OPT_FILE_DOWN)
 			{
 
@@ -1528,7 +1562,7 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 	}
 
 	else if (buf->operation == OP_READ)
-	{
+	{//handle IO operation and MESSAGE after server reiceived MESSAGE from client
 		sockobj = (SOCKET_OBJ *)key;
 		InterlockedDecrement(&sockobj->OutstandingRecv);
 
@@ -1619,7 +1653,7 @@ void HandleIo(ULONG_PTR key, BUFFER_OBJ *buf, HANDLE CompPort, DWORD BytesTransf
 		}
 	}
 	else if (buf->operation == OP_WRITE)
-	{
+	{//handle IO operation and MESSAGE after server send MESSAGE to client
 		fprintf(stderr, "wrtting:");
 		sockobj = (SOCKET_OBJ *)key;
 		InterlockedDecrement(&sockobj->OutstandingSend);
@@ -1761,7 +1795,11 @@ DWORD WINAPI CompletionThread(LPVOID lpParam)
 	ExitThread(0);
 	return 0;
 }
-
+// Function: workerReadThread
+// Description:
+//    This is the  thread which services our Download file protocol . One of
+//    these threads is created  on the system. The thread sits in
+//    an infinite loop calling ProcessDownloadingOperations to process file operation needed .
 unsigned __stdcall workerReadThread(void *param)
 {
 	while (TRUE)
@@ -1769,7 +1807,11 @@ unsigned __stdcall workerReadThread(void *param)
 		ProcessDownloadingOperations();
 	}
 }
-
+// Function: workerWriteThread
+// Description:
+//    This is the  thread which services our Upload file protocol . One of
+//    these threads is created  on the system. The thread sits in
+//    an infinite loop calling ProcessUploadingOperations to process file operation needed .
 unsigned __stdcall workerWriteThread(void *param)
 {
 	while (TRUE)
